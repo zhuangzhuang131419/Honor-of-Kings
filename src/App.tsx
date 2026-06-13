@@ -1,0 +1,1079 @@
+import { useEffect, useMemo, useState } from "react";
+import type { ComboSummary, DraftPlayer, FilterState, Match, MatchPlayerRow, PlayerSummary, Side, SummaryDimension, TimeGranularity } from "./types";
+import { assertCsvShape, csvHeaders, groupMatches, parseCsv, rowsToCsv } from "./data/csv";
+import {
+  applyFilters,
+  emptyFilters,
+  filterForPk,
+  getMatchDetail,
+  getLinkedOptions,
+  getOptions,
+  ranking,
+  summarizeCombinations,
+  summarizeByDimensions,
+  summarizePlayers,
+  summarizeTarget,
+  timeSeries,
+} from "./data/stats";
+
+type Tab = "analysis" | "pk" | "ranking" | "entry";
+type SummarySortKey = "label" | "matches" | "winRate" | "avgRating" | "kda" | "avgDamageDealt" | "avgDamageTaken" | "totalGold" | "mvpCount";
+type ComboSortKey = "size" | "label" | "matches" | "winRate" | "winsLosses" | "avgRating" | "kda" | "totalGold";
+type SortDirection = "asc" | "desc";
+type CandidateConfig = {
+  summoners: string[];
+  summonerAliases?: Record<string, string[]>;
+  heroes: string[];
+};
+
+const positions = ["对抗路", "打野", "中路", "发育路", "游走", "辅助"];
+
+const emptyPlayer = (side: Side, index: number): DraftPlayer => ({
+  side,
+  summoner: "",
+  hero: "",
+  position: positions[index % positions.length],
+  rating: 0,
+  kills: 0,
+  deaths: 0,
+  assists: 0,
+  damageDealt: 0,
+  damageTaken: 0,
+  gold: 0,
+  teamfightRate: 0,
+  isMvp: false,
+  medal: "",
+  item1: "",
+  item2: "",
+  item3: "",
+  item4: "",
+  item5: "",
+  item6: "",
+  notes: "",
+});
+
+export default function App() {
+  const [rows, setRows] = useState<MatchPlayerRow[]>([]);
+  const [loadError, setLoadError] = useState("");
+  const [candidateConfig, setCandidateConfig] = useState<CandidateConfig>({ summoners: [], heroes: [] });
+  const [tab, setTab] = useState<Tab>("analysis");
+  const [filters, setFilters] = useState<FilterState>(emptyFilters);
+  const [granularity, setGranularity] = useState<TimeGranularity>("day");
+  const [selectedMatchId, setSelectedMatchId] = useState("");
+  const [rankingGranularity, setRankingGranularity] = useState<TimeGranularity>("month");
+  const [summaryDimensions, setSummaryDimensions] = useState<SummaryDimension[]>(["summoner"]);
+  const [comboSizes, setComboSizes] = useState<number[]>([2, 3, 4, 5]);
+  const [comboMinMatches, setComboMinMatches] = useState(1);
+  const [minMatches, setMinMatches] = useState(1);
+  const [pkLeft, setPkLeft] = useState<FilterState>(emptyFilters);
+  const [pkRight, setPkRight] = useState<FilterState>(emptyFilters);
+
+  useEffect(() => {
+    fetch(`${import.meta.env.BASE_URL}data/matches.csv`)
+      .then((response) => {
+        if (!response.ok) throw new Error(`CSV 加载失败: ${response.status}`);
+        return response.text();
+      })
+      .then((text) => setRows(parseCsv(text)))
+      .catch((error: Error) => setLoadError(error.message));
+  }, []);
+
+  useEffect(() => {
+    fetch(`${import.meta.env.BASE_URL}data/candidates.json`)
+      .then((response) => {
+        if (!response.ok) throw new Error("候选词库加载失败");
+        return response.json() as Promise<CandidateConfig>;
+      })
+      .then((config) => {
+        setCandidateConfig({
+          summoners: uniqueTextList(config.summoners),
+          summonerAliases: config.summonerAliases ?? {},
+          heroes: uniqueTextList(config.heroes),
+        });
+      })
+      .catch(() => {
+        setCandidateConfig({ summoners: [], heroes: [] });
+      });
+  }, []);
+
+  const matches = useMemo(() => groupMatches(rows), [rows]);
+  const friendRows = useMemo(() => filterFriendRows(rows, candidateConfig.summoners), [rows, candidateConfig.summoners]);
+  const options = useMemo(() => getOptions(friendRows), [friendRows]);
+  const linkedOptions = useMemo(() => getLinkedOptions(friendRows, matches, filters), [friendRows, matches, filters]);
+  const pkLeftOptions = useMemo(() => getLinkedOptions(friendRows, matches, pkLeft), [friendRows, matches, pkLeft]);
+  const pkRightOptions = useMemo(() => getLinkedOptions(friendRows, matches, pkRight), [friendRows, matches, pkRight]);
+  const filteredRows = useMemo(() => applyFilters(friendRows, matches, filters), [friendRows, matches, filters]);
+  const summaries = useMemo(
+    () => summarizeByDimensions(filteredRows, summaryDimensions),
+    [filteredRows, summaryDimensions],
+  );
+  const comboSummaries = useMemo(
+    () => summarizeCombinations(filteredRows, friendRows, matches, filters, comboSizes, comboMinMatches),
+    [filteredRows, friendRows, matches, filters, comboSizes, comboMinMatches],
+  );
+  const buckets = useMemo(() => timeSeries(filteredRows, granularity), [filteredRows, granularity]);
+  const selectedMatch = useMemo(() => getMatchDetail(matches, selectedMatchId), [matches, selectedMatchId]);
+
+  const pkLeftRows = useMemo(() => filterForPk(friendRows, matches, pkLeft), [friendRows, matches, pkLeft]);
+  const pkRightRows = useMemo(() => filterForPk(friendRows, matches, pkRight), [friendRows, matches, pkRight]);
+  const pkLeftSummary = useMemo(() => summarizeTarget(pkLeftRows, pkLeft.summoner), [pkLeftRows, pkLeft.summoner]);
+  const pkRightSummary = useMemo(() => summarizeTarget(pkRightRows, pkRight.summoner), [pkRightRows, pkRight.summoner]);
+
+  const rankedRows = useMemo(() => {
+    const scoped = applyFilters(friendRows, matches, { ...emptyFilters, startDate: rankingStartDate(rankingGranularity) });
+    return ranking(scoped, minMatches);
+  }, [friendRows, matches, rankingGranularity, minMatches]);
+
+  return (
+    <main className="app-shell">
+      <aside className="sidebar">
+        <div className="brand-mark">K</div>
+        <nav aria-label="主导航">
+          <button className={tab === "analysis" ? "active" : ""} onClick={() => setTab("analysis")} title="分析">
+            分析
+          </button>
+          <button className={tab === "pk" ? "active" : ""} onClick={() => setTab("pk")} title="PK">
+            PK
+          </button>
+          <button className={tab === "ranking" ? "active" : ""} onClick={() => setTab("ranking")} title="排行榜">
+            排行
+          </button>
+          <button className={tab === "entry" ? "active" : ""} onClick={() => setTab("entry")} title="录入">
+            录入
+          </button>
+        </nav>
+      </aside>
+
+      <section className="workspace">
+        <header className="topbar">
+          <div>
+            <p className="eyebrow">Honor of Kings Analytics</p>
+            <h1>王者荣耀对局分析</h1>
+          </div>
+          <div className="status-strip">
+            <Metric label="对局" value={String(matches.length)} />
+            <Metric label="记录" value={String(rows.length)} />
+            <Metric label="召唤师" value={String(options.summoners.length)} />
+          </div>
+        </header>
+
+        {loadError ? <div className="alert">{loadError}</div> : null}
+
+        {tab === "analysis" ? (
+          <AnalysisView
+            filters={filters}
+            setFilters={setFilters}
+            options={options}
+            linkedOptions={linkedOptions}
+            summaryDimensions={summaryDimensions}
+            setSummaryDimensions={setSummaryDimensions}
+            granularity={granularity}
+            setGranularity={setGranularity}
+            buckets={buckets}
+            summaries={summaries}
+            comboSummaries={comboSummaries}
+            comboSizes={comboSizes}
+            setComboSizes={setComboSizes}
+            comboMinMatches={comboMinMatches}
+            setComboMinMatches={setComboMinMatches}
+            rows={filteredRows}
+            matches={matches}
+            selectedMatch={selectedMatch}
+            setSelectedMatchId={setSelectedMatchId}
+          />
+        ) : null}
+        {tab === "pk" ? (
+          <PkView
+            left={pkLeft}
+            right={pkRight}
+            setLeft={setPkLeft}
+            setRight={setPkRight}
+            options={options}
+            leftOptions={pkLeftOptions}
+            rightOptions={pkRightOptions}
+            leftSummary={pkLeftSummary}
+            rightSummary={pkRightSummary}
+          />
+        ) : null}
+        {tab === "ranking" ? (
+          <RankingView
+            granularity={rankingGranularity}
+            setGranularity={setRankingGranularity}
+            minMatches={minMatches}
+            setMinMatches={setMinMatches}
+            rows={rankedRows}
+          />
+        ) : null}
+        {tab === "entry" ? <EntryView existingRows={rows} candidateConfig={candidateConfig} /> : null}
+      </section>
+    </main>
+  );
+}
+
+function AnalysisView(props: {
+  filters: FilterState;
+  setFilters: (filters: FilterState) => void;
+  options: ReturnType<typeof getOptions>;
+  linkedOptions: ReturnType<typeof getLinkedOptions>;
+  summaryDimensions: SummaryDimension[];
+  setSummaryDimensions: (dimensions: SummaryDimension[]) => void;
+  granularity: TimeGranularity;
+  setGranularity: (granularity: TimeGranularity) => void;
+  buckets: ReturnType<typeof timeSeries>;
+  summaries: PlayerSummary[];
+  comboSummaries: ComboSummary[];
+  comboSizes: number[];
+  setComboSizes: (sizes: number[]) => void;
+  comboMinMatches: number;
+  setComboMinMatches: (value: number) => void;
+  rows: MatchPlayerRow[];
+  matches: Match[];
+  selectedMatch?: Match;
+  setSelectedMatchId: (matchId: string) => void;
+}) {
+  return (
+    <div className="view-grid">
+      <section className="panel span-12 allow-overflow">
+        <div className="panel-title">
+          <h2>筛选条件</h2>
+          <Segmented
+            value={props.granularity}
+            onChange={(value) => props.setGranularity(value as TimeGranularity)}
+            options={[
+              ["day", "日"],
+              ["week", "周"],
+              ["month", "月"],
+            ]}
+          />
+        </div>
+        <FilterBar filters={props.filters} setFilters={props.setFilters} options={props.linkedOptions} includeResult />
+      </section>
+
+      <section className="panel span-8">
+        <div className="panel-title">
+          <h2>胜率趋势</h2>
+          <span>{props.rows.length} 条记录</span>
+        </div>
+        <WinRateChart buckets={props.buckets} />
+      </section>
+
+      <section className="panel span-4">
+        <div className="panel-title">
+          <h2>概览</h2>
+        </div>
+        <SummaryGrid summaries={props.summaries} />
+      </section>
+
+      <section className="panel span-7">
+        <div className="panel-title">
+          <h2>召唤师表现</h2>
+          <DimensionPicker dimensions={props.summaryDimensions} setDimensions={props.setSummaryDimensions} />
+        </div>
+        <SummaryTable rows={props.summaries} dimensions={props.summaryDimensions} />
+      </section>
+
+      <section className="panel span-5">
+        <div className="panel-title">
+          <h2>对局下钻</h2>
+        </div>
+        <MatchList rows={props.rows} matches={props.matches} setSelectedMatchId={props.setSelectedMatchId} />
+      </section>
+
+      <section className="panel span-12">
+        <div className="panel-title combo-title">
+          <h2>组合表现</h2>
+          <ComboControls
+            sizes={props.comboSizes}
+            setSizes={props.setComboSizes}
+            minMatches={props.comboMinMatches}
+            setMinMatches={props.setComboMinMatches}
+          />
+        </div>
+        <ComboTable rows={props.comboSummaries} />
+      </section>
+
+      {props.selectedMatch ? (
+        <section className="panel span-12">
+          <div className="panel-title">
+            <h2>单局详情</h2>
+            <span>{props.selectedMatch.playedAt}</span>
+          </div>
+          <MatchDetail match={props.selectedMatch} />
+        </section>
+      ) : null}
+    </div>
+  );
+}
+
+function PkView(props: {
+  left: FilterState;
+  right: FilterState;
+  setLeft: (filters: FilterState) => void;
+  setRight: (filters: FilterState) => void;
+  options: ReturnType<typeof getOptions>;
+  leftOptions: ReturnType<typeof getLinkedOptions>;
+  rightOptions: ReturnType<typeof getLinkedOptions>;
+  leftSummary: PlayerSummary;
+  rightSummary: PlayerSummary;
+}) {
+  return (
+    <div className="view-grid">
+      <section className="panel span-12">
+        <div className="panel-title">
+          <h2>召唤师 PK</h2>
+          <span>前端独立过滤与聚合，双方条件互不影响</span>
+        </div>
+      </section>
+      <section className="panel span-6 blue-edge allow-overflow">
+        <h2>蓝方条件</h2>
+        <FilterBar filters={props.left} setFilters={props.setLeft} options={props.leftOptions} compact />
+        <PkCard summary={props.leftSummary} rival={props.rightSummary} />
+      </section>
+      <section className="panel span-6 red-edge allow-overflow">
+        <h2>红方条件</h2>
+        <FilterBar filters={props.right} setFilters={props.setRight} options={props.rightOptions} compact />
+        <PkCard summary={props.rightSummary} rival={props.leftSummary} />
+      </section>
+    </div>
+  );
+}
+
+function RankingView(props: {
+  granularity: TimeGranularity;
+  setGranularity: (granularity: TimeGranularity) => void;
+  minMatches: number;
+  setMinMatches: (value: number) => void;
+  rows: PlayerSummary[];
+}) {
+  return (
+    <div className="view-grid">
+      <section className="panel span-12">
+        <div className="panel-title">
+          <h2>排行榜</h2>
+          <Segmented
+            value={props.granularity}
+            onChange={(value) => props.setGranularity(value as TimeGranularity)}
+            options={[
+              ["day", "日"],
+              ["week", "周"],
+              ["month", "月"],
+            ]}
+          />
+        </div>
+        <label className="field narrow">
+          <span>最低场次</span>
+          <input
+            type="number"
+            min="1"
+            value={props.minMatches}
+            onChange={(event) => props.setMinMatches(Number(event.target.value))}
+          />
+        </label>
+      </section>
+      <section className="panel span-12">
+        <table>
+          <thead>
+            <tr>
+              <th>排名</th>
+              <th>召唤师</th>
+              <th>场次</th>
+              <th>胜率</th>
+              <th>评分</th>
+              <th>KDA</th>
+              <th>MVP</th>
+            </tr>
+          </thead>
+          <tbody>
+            {props.rows.map((row, index) => (
+              <tr key={row.summoner}>
+                <td>{index + 1}</td>
+                <td>{row.summoner}</td>
+                <td>{row.matches}</td>
+                <td>{percent(row.winRate)}</td>
+                <td>{fixed(row.avgRating)}</td>
+                <td>{fixed(row.kda)}</td>
+                <td>{row.mvpCount}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </section>
+    </div>
+  );
+}
+
+function EntryView({ existingRows, candidateConfig }: { existingRows: MatchPlayerRow[]; candidateConfig: CandidateConfig }) {
+  const [matchId, setMatchId] = useState(`M${new Date().toISOString().slice(0, 16).replace(/\D/g, "")}`);
+  const [playedAt, setPlayedAt] = useState(new Date().toISOString().slice(0, 16));
+  const [mode, setMode] = useState("5v5排位");
+  const [durationSeconds, setDurationSeconds] = useState(1200);
+  const [blueKills, setBlueKills] = useState(0);
+  const [redKills, setRedKills] = useState(0);
+  const [winningSide, setWinningSide] = useState<Side>("blue");
+  const [players, setPlayers] = useState<DraftPlayer[]>([
+    ...Array.from({ length: 5 }, (_, index) => emptyPlayer("blue", index)),
+    ...Array.from({ length: 5 }, (_, index) => emptyPlayer("red", index)),
+  ]);
+  const [importFileName, setImportFileName] = useState("");
+  const [importedRows, setImportedRows] = useState<MatchPlayerRow[]>([]);
+  const [importIssues, setImportIssues] = useState<string[]>([]);
+  const draftRows = useMemo(
+    () =>
+      players.map((player) => ({
+        matchId,
+        playedAt: playedAt.replace("T", " "),
+        mode,
+        durationSeconds,
+        blueKills,
+        redKills,
+        winningSide,
+        ...player,
+      })),
+    [players, matchId, playedAt, mode, durationSeconds, blueKills, redKills, winningSide],
+  );
+
+  function updatePlayer(index: number, patch: Partial<DraftPlayer>) {
+    setPlayers((current) => current.map((player, playerIndex) => (playerIndex === index ? { ...player, ...patch } : player)));
+  }
+
+  function downloadRows(rows: MatchPlayerRow[], filename: string) {
+    const blob = new Blob([rowsToCsv(rows)], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function downloadDraft(mergeExisting: boolean) {
+    downloadRows(mergeExisting ? [...existingRows, ...draftRows] : draftRows, mergeExisting ? "matches.csv" : `${matchId}.csv`);
+  }
+
+  function downloadImported(mergeExisting: boolean) {
+    if (!importedRows.length) return;
+    downloadRows(mergeExisting ? [...existingRows, ...importedRows] : importedRows, mergeExisting ? "matches.csv" : importFileName || "imported-matches.csv");
+  }
+
+  async function handleCsvImport(file: File) {
+    const text = await file.text();
+    const parsedRows = parseCsv(text);
+    setImportFileName(file.name || "imported-matches.csv");
+    setImportedRows(parsedRows);
+    setImportIssues(assertCsvShape(parsedRows));
+  }
+
+  return (
+    <div className="view-grid">
+      <section className="panel span-12">
+        <div className="panel-title">
+          <h2>对局录入</h2>
+          <span>草稿确认后导出 CSV，再提交到仓库</span>
+        </div>
+        <div className="form-grid">
+          <Field label="对局 ID" value={matchId} onChange={setMatchId} />
+          <Field label="时间" type="datetime-local" value={playedAt} onChange={setPlayedAt} />
+          <Field label="模式" value={mode} onChange={setMode} />
+          <Field label="时长秒" type="number" value={durationSeconds} onChange={(value) => setDurationSeconds(Number(value))} />
+          <Field label="蓝方击杀" type="number" value={blueKills} onChange={(value) => setBlueKills(Number(value))} />
+          <Field label="红方击杀" type="number" value={redKills} onChange={(value) => setRedKills(Number(value))} />
+          <label className="field">
+            <span>胜方</span>
+            <select value={winningSide} onChange={(event) => setWinningSide(event.target.value as Side)}>
+              <option value="blue">蓝方</option>
+              <option value="red">红方</option>
+            </select>
+          </label>
+        </div>
+      </section>
+
+      <section className="panel span-5">
+        <div className="panel-title">
+          <h2>CSV 导入</h2>
+        </div>
+        <p className="hint csv-note">当前先统一走 CSV。截图识别暂不放在网页录入流程里，避免乱码和错位污染正式数据。</p>
+        <label className="field">
+          <span>选择 CSV</span>
+          <input
+            className="file-input"
+            type="file"
+            accept=".csv,text/csv"
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              if (file) void handleCsvImport(file);
+            }}
+          />
+        </label>
+        <div className="import-summary">
+          <Metric label="导入记录" value={String(importedRows.length)} />
+          <Metric label="导入对局" value={String(groupMatches(importedRows).length)} />
+          <Metric label="校验提示" value={String(importIssues.length)} accent={!importIssues.length && importedRows.length > 0} />
+        </div>
+        {importIssues.length ? (
+          <details className="alert compact-alert" open>
+            <summary>导入 CSV 有 {importIssues.length} 个需要检查的地方</summary>
+            <ul>
+              {importIssues.slice(0, 8).map((issue) => (
+                <li key={issue}>{issue}</li>
+              ))}
+            </ul>
+          </details>
+        ) : null}
+        <div className="button-row vertical">
+          <button disabled={!importedRows.length} onClick={() => downloadImported(false)}>
+            导出导入 CSV
+          </button>
+          <button className="primary" disabled={!importedRows.length} onClick={() => downloadImported(true)}>
+            合并导出 matches.csv
+          </button>
+        </div>
+        <CandidateSummary config={candidateConfig} />
+      </section>
+
+      <section className="panel span-7">
+        <div className="panel-title">
+          <h2>玩家草稿</h2>
+          <div className="button-row">
+            <button onClick={() => downloadDraft(false)}>导出本局</button>
+            <button className="primary" onClick={() => downloadDraft(true)}>
+              合并导出 matches.csv
+            </button>
+          </div>
+        </div>
+        <DraftTable players={players} updatePlayer={updatePlayer} />
+      </section>
+    </div>
+  );
+}
+
+function FilterBar(props: {
+  filters: FilterState;
+  setFilters: (filters: FilterState) => void;
+  options: ReturnType<typeof getLinkedOptions>;
+  includeResult?: boolean;
+  compact?: boolean;
+}) {
+  const update = (patch: Partial<FilterState>) => props.setFilters({ ...props.filters, ...patch });
+  return (
+    <div className={props.compact ? "filter-grid compact" : "filter-grid"}>
+      <SelectField label="召唤师" value={props.filters.summoner} options={props.options.summoners} onChange={(value) => update({ summoner: value })} />
+      <SelectField label="英雄" value={props.filters.hero} options={props.options.heroes} onChange={(value) => update({ hero: value })} />
+      <MultiSelectField
+        label="队友"
+        values={props.filters.teammates}
+        options={props.options.teammates}
+        onChange={(values) => update({ teammates: values })}
+      />
+      <SelectField label="位置" value={props.filters.position} options={props.options.positions} onChange={(value) => update({ position: value })} />
+      <SelectField label="模式" value={props.filters.mode} options={props.options.modes} onChange={(value) => update({ mode: value })} />
+      {props.includeResult ? (
+        <label className="field">
+          <span>胜负</span>
+          <select value={props.filters.result} onChange={(event) => update({ result: event.target.value as FilterState["result"] })}>
+            <option value="all">全部</option>
+            <option value="win">胜利</option>
+            <option value="loss">失败</option>
+          </select>
+        </label>
+      ) : null}
+      <Field label="开始" type="date" value={props.filters.startDate} onChange={(value) => update({ startDate: value })} />
+      <Field label="结束" type="date" value={props.filters.endDate} onChange={(value) => update({ endDate: value })} />
+      <button onClick={() => props.setFilters(emptyFilters)}>重置</button>
+    </div>
+  );
+}
+
+function WinRateChart({ buckets }: { buckets: ReturnType<typeof timeSeries> }) {
+  if (!buckets.length) return <div className="empty">暂无符合条件的数据</div>;
+  return (
+    <div className="chart" role="img" aria-label="胜率柱状图">
+      {buckets.map((bucket) => (
+        <div className="bar-group" key={bucket.label}>
+          <div className="bar-shell">
+            <div className="bar-fill" style={{ height: `${Math.max(4, bucket.winRate * 100)}%` }} />
+          </div>
+          <strong>{percent(bucket.winRate)}</strong>
+          <span title={bucket.label}>{bucket.label}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function SummaryGrid({ summaries }: { summaries: PlayerSummary[] }) {
+  const totalMatches = summaries.reduce((total, summary) => total + summary.matches, 0);
+  const totalWins = summaries.reduce((total, summary) => total + summary.wins, 0);
+  const best = summaries[0];
+  return (
+    <div className="metric-grid">
+      <Metric label="筛选记录" value={String(totalMatches)} />
+      <Metric label="整体胜率" value={percent(totalMatches ? totalWins / totalMatches : 0)} />
+      <Metric label="最佳召唤师" value={best?.summoner ?? "-"} />
+      <Metric label="最佳评分" value={best ? fixed(best.avgRating) : "-"} />
+    </div>
+  );
+}
+
+function DimensionPicker(props: { dimensions: SummaryDimension[]; setDimensions: (dimensions: SummaryDimension[]) => void }) {
+  function toggle(dimension: SummaryDimension) {
+    const next = props.dimensions.includes(dimension)
+      ? props.dimensions.filter((item) => item !== dimension)
+      : [...props.dimensions, dimension];
+    props.setDimensions(next.length ? next : [dimension]);
+  }
+
+  return (
+    <div className="dimension-picker" aria-label="下钻字段">
+      <span>下钻</span>
+      {([
+        ["summoner", "召唤师"],
+        ["hero", "英雄"],
+      ] as const).map(([dimension, label]) => (
+        <label key={dimension}>
+          <input type="checkbox" checked={props.dimensions.includes(dimension)} onChange={() => toggle(dimension)} />
+          {label}
+        </label>
+      ))}
+    </div>
+  );
+}
+
+function SummaryTable({ rows, dimensions }: { rows: PlayerSummary[]; dimensions: SummaryDimension[] }) {
+  const [sortKey, setSortKey] = useState<SummarySortKey>("winRate");
+  const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
+  const label = dimensions.map((dimension) => (dimension === "hero" ? "英雄" : "召唤师")).join(" / ");
+  const sortedRows = useMemo(
+    () => [...rows].sort((a, b) => compareSummaries(a, b, sortKey, sortDirection)),
+    [rows, sortKey, sortDirection],
+  );
+
+  function updateSort(key: SummarySortKey) {
+    if (sortKey === key) {
+      setSortDirection(sortDirection === "asc" ? "desc" : "asc");
+      return;
+    }
+    setSortKey(key);
+    setSortDirection(key === "label" ? "asc" : "desc");
+  }
+
+  function SortHeader({ column, children }: { column: SummarySortKey; children: string }) {
+    const active = sortKey === column;
+    return (
+      <th>
+        <button className={active ? "sort-button active" : "sort-button"} onClick={() => updateSort(column)}>
+          {children}
+          <span>{active ? (sortDirection === "asc" ? "↑" : "↓") : ""}</span>
+        </button>
+      </th>
+    );
+  }
+
+  return (
+    <table>
+      <thead>
+        <tr>
+          <SortHeader column="label">{label}</SortHeader>
+          <SortHeader column="matches">场次</SortHeader>
+          <SortHeader column="winRate">胜率</SortHeader>
+          <SortHeader column="avgRating">评分</SortHeader>
+          <SortHeader column="kda">KDA</SortHeader>
+          <SortHeader column="avgDamageDealt">输出</SortHeader>
+          <SortHeader column="avgDamageTaken">承伤</SortHeader>
+          <SortHeader column="totalGold">总经济</SortHeader>
+          <SortHeader column="mvpCount">MVP</SortHeader>
+        </tr>
+      </thead>
+      <tbody>
+        {sortedRows.map((row) => (
+          <tr key={row.summoner}>
+            <td>{row.summoner}</td>
+            <td>{row.matches}</td>
+            <td>{percent(row.winRate)}</td>
+            <td>{fixed(row.avgRating)}</td>
+            <td>{fixed(row.kda)}</td>
+            <td>{compactNumber(row.avgDamageDealt)}</td>
+            <td>{compactNumber(row.avgDamageTaken)}</td>
+            <td>{compactNumber(row.totalGold)}</td>
+            <td>{row.mvpCount}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+function ComboControls(props: { sizes: number[]; setSizes: (sizes: number[]) => void; minMatches: number; setMinMatches: (value: number) => void }) {
+  function toggleSize(size: number) {
+    const next = props.sizes.includes(size) ? props.sizes.filter((item) => item !== size) : [...props.sizes, size].sort((a, b) => a - b);
+    props.setSizes(next.length ? next : [size]);
+  }
+
+  return (
+    <div className="combo-controls">
+      <div className="dimension-picker" aria-label="组合人数">
+        <span>组合人数</span>
+        {[2, 3, 4, 5].map((size) => (
+          <label key={size}>
+            <input type="checkbox" checked={props.sizes.includes(size)} onChange={() => toggleSize(size)} />
+            {size}人
+          </label>
+        ))}
+      </div>
+      <label className="inline-number">
+        <span>最低场次</span>
+        <input
+          min="1"
+          type="number"
+          value={props.minMatches}
+          onChange={(event) => {
+            const next = Number(event.target.value);
+            props.setMinMatches(Number.isFinite(next) ? Math.max(1, next) : 1);
+          }}
+        />
+      </label>
+    </div>
+  );
+}
+
+function ComboTable({ rows }: { rows: ComboSummary[] }) {
+  const [sortKey, setSortKey] = useState<ComboSortKey>("winRate");
+  const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
+  const sortedRows = useMemo(
+    () => [...rows].sort((a, b) => compareCombos(a, b, sortKey, sortDirection)),
+    [rows, sortKey, sortDirection],
+  );
+
+  function updateSort(key: ComboSortKey) {
+    if (sortKey === key) {
+      setSortDirection(sortDirection === "asc" ? "desc" : "asc");
+      return;
+    }
+    setSortKey(key);
+    setSortDirection(key === "label" || key === "size" ? "asc" : "desc");
+  }
+
+  function SortHeader({ column, children }: { column: ComboSortKey; children: string }) {
+    const active = sortKey === column;
+    return (
+      <th>
+        <button className={active ? "sort-button active" : "sort-button"} onClick={() => updateSort(column)}>
+          {children}
+          <span>{active ? (sortDirection === "asc" ? "↑" : "↓") : ""}</span>
+        </button>
+      </th>
+    );
+  }
+
+  if (!rows.length) return <div className="empty compact-empty">暂无符合条件的组合</div>;
+
+  return (
+    <table>
+      <thead>
+        <tr>
+          <SortHeader column="size">组合人数</SortHeader>
+          <SortHeader column="label">召唤师组合</SortHeader>
+          <SortHeader column="matches">场次</SortHeader>
+          <SortHeader column="winRate">胜率</SortHeader>
+          <SortHeader column="winsLosses">胜-负</SortHeader>
+          <SortHeader column="avgRating">平均评分</SortHeader>
+          <SortHeader column="kda">KDA</SortHeader>
+          <SortHeader column="totalGold">总经济</SortHeader>
+        </tr>
+      </thead>
+      <tbody>
+        {sortedRows.map((row) => (
+          <tr key={`${row.size}-${row.label}`}>
+            <td>{row.size}人</td>
+            <td>{row.label}</td>
+            <td>{row.matches}</td>
+            <td>{percent(row.winRate)}</td>
+            <td>
+              {row.wins}-{row.losses}
+            </td>
+            <td>{fixed(row.avgRating)}</td>
+            <td>{fixed(row.kda)}</td>
+            <td>{compactNumber(row.totalGold)}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+function MatchList(props: { rows: MatchPlayerRow[]; matches: Match[]; setSelectedMatchId: (matchId: string) => void }) {
+  const ids = new Set(props.rows.map((row) => row.matchId));
+  const visibleMatches = props.matches.filter((match) => ids.has(match.matchId));
+  return (
+    <div className="match-list">
+      {visibleMatches.map((match) => (
+        <button key={match.matchId} onClick={() => props.setSelectedMatchId(match.matchId)}>
+          <span>{match.playedAt}</span>
+          <strong className={match.winningSide === "blue" ? "blue-text" : "red-text"}>
+            {match.blueKills} : {match.redKills}
+          </strong>
+          <span>{match.mode}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function MatchDetail({ match }: { match: Match }) {
+  return (
+    <div className="detail-grid">
+      {(["blue", "red"] as Side[]).map((side) => (
+        <div className={`team-column ${side}`} key={side}>
+          <h3>{side === "blue" ? "蓝方" : "红方"}</h3>
+          {match.players
+            .filter((player) => player.side === side)
+            .map((player) => (
+              <div className="player-row" key={`${player.matchId}-${player.summoner}`}>
+                <div>
+                  <strong>{player.summoner}</strong>
+                  <span>
+                    {player.hero} · {player.position}
+                  </span>
+                </div>
+                <b>{fixed(player.rating)}</b>
+                <span>
+                  {player.kills}/{player.deaths}/{player.assists}
+                </span>
+                <span>{compactNumber(player.damageDealt)}</span>
+              </div>
+            ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function PkCard({ summary, rival }: { summary: PlayerSummary; rival: PlayerSummary }) {
+  return (
+    <div className="pk-card">
+      <div>
+        <p className="eyebrow">Summoner</p>
+        <h3>{summary.summoner}</h3>
+      </div>
+      <Metric label="胜率" value={percent(summary.winRate)} accent={summary.winRate >= rival.winRate} />
+      <Metric label="场次" value={String(summary.matches)} accent={summary.matches >= rival.matches} />
+      <Metric label="评分" value={fixed(summary.avgRating)} accent={summary.avgRating >= rival.avgRating} />
+      <Metric label="KDA" value={fixed(summary.kda)} accent={summary.kda >= rival.kda} />
+      <Metric label="输出" value={compactNumber(summary.avgDamageDealt)} accent={summary.avgDamageDealt >= rival.avgDamageDealt} />
+      <Metric label="承伤" value={compactNumber(summary.avgDamageTaken)} accent={summary.avgDamageTaken >= rival.avgDamageTaken} />
+    </div>
+  );
+}
+
+function DraftTable({
+  players,
+  updatePlayer,
+}: {
+  players: DraftPlayer[];
+  updatePlayer: (index: number, patch: Partial<DraftPlayer>) => void;
+}) {
+  return (
+    <div className="draft-table">
+      <div className="draft-row draft-header">
+        <span>阵营</span>
+        <span>召唤师</span>
+        <span>英雄</span>
+        <span>位置</span>
+        <span>评分</span>
+        <span>K</span>
+        <span>D</span>
+        <span>A</span>
+        <span>输出</span>
+        <span>承伤</span>
+        <span>经济</span>
+        <span>参团</span>
+        <span>MVP</span>
+      </div>
+      {players.map((player, index) => (
+        <div className={`draft-row ${player.side}`} key={index}>
+          <span className="side-pill">{player.side === "blue" ? "蓝" : "红"}</span>
+          <input value={player.summoner} placeholder="召唤师" onChange={(event) => updatePlayer(index, { summoner: event.target.value })} />
+          <input value={player.hero} placeholder="英雄" onChange={(event) => updatePlayer(index, { hero: event.target.value })} />
+          <select value={player.position} onChange={(event) => updatePlayer(index, { position: event.target.value })}>
+            {positions.map((position) => (
+              <option key={position} value={position}>
+                {position}
+              </option>
+            ))}
+          </select>
+          <NumberInput value={player.rating} onChange={(value) => updatePlayer(index, { rating: value })} placeholder="评分" />
+          <NumberInput value={player.kills} onChange={(value) => updatePlayer(index, { kills: value })} placeholder="K" />
+          <NumberInput value={player.deaths} onChange={(value) => updatePlayer(index, { deaths: value })} placeholder="D" />
+          <NumberInput value={player.assists} onChange={(value) => updatePlayer(index, { assists: value })} placeholder="A" />
+          <NumberInput value={player.damageDealt} onChange={(value) => updatePlayer(index, { damageDealt: value })} placeholder="输出" />
+          <NumberInput value={player.damageTaken} onChange={(value) => updatePlayer(index, { damageTaken: value })} placeholder="承伤" />
+          <NumberInput value={player.gold} onChange={(value) => updatePlayer(index, { gold: value })} placeholder="经济" />
+          <NumberInput value={player.teamfightRate} onChange={(value) => updatePlayer(index, { teamfightRate: value })} placeholder="参团" />
+          <label className="check-field">
+            <input type="checkbox" checked={player.isMvp} onChange={(event) => updatePlayer(index, { isMvp: event.target.checked })} />
+            MVP
+          </label>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function CandidateSummary({ config }: { config: CandidateConfig }) {
+  return (
+    <details className="candidate-panel">
+      <summary>数据字典：{config.summoners.length} 个朋友 ID，{config.heroes.length} 个英雄</summary>
+      <p className="hint">候选项来自 `public/data/candidates.json`。`summoners` 是朋友白名单，分析、PK 和排行榜只统计这些 ID。</p>
+      <div className="candidate-tags">
+        {[...config.summoners.slice(0, 8), ...config.heroes.slice(0, 8)].map((item) => (
+          <span key={item}>{item}</span>
+        ))}
+      </div>
+    </details>
+  );
+}
+
+function Field(props: {
+  label: string;
+  value: string | number;
+  onChange: (value: string) => void;
+  type?: string;
+}) {
+  return (
+    <label className="field">
+      <span>{props.label}</span>
+      <input type={props.type ?? "text"} value={props.value} onChange={(event) => props.onChange(event.target.value)} />
+    </label>
+  );
+}
+
+function NumberInput(props: { value: number; onChange: (value: number) => void; placeholder: string }) {
+  return <input type="number" value={props.value} placeholder={props.placeholder} onChange={(event) => props.onChange(Number(event.target.value))} />;
+}
+
+function SelectField(props: { label: string; value: string; options: string[]; onChange: (value: string) => void }) {
+  return (
+    <label className="field">
+      <span>{props.label}</span>
+      <select value={props.value} onChange={(event) => props.onChange(event.target.value)}>
+        <option value="">全部</option>
+        {props.options.map((option) => (
+          <option value={option} key={option}>
+            {option}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+function MultiSelectField(props: { label: string; values: string[]; options: string[]; onChange: (values: string[]) => void }) {
+  const options = [...new Set([...props.values, ...props.options])];
+  const summary = props.values.length ? props.values.join("、") : options.length ? `全部，可选 ${options.length} 人` : "暂无可选队友";
+  return (
+    <div className="field">
+      <span>{props.label}</span>
+      <details className="multi-select">
+        <summary>{summary}</summary>
+        <div className="multi-menu">
+          {options.length ? (
+            options.map((option) => {
+              const checked = props.values.includes(option);
+              return (
+                <label key={option} className="multi-option">
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={(event) => {
+                      if (event.target.checked) props.onChange([...props.values, option]);
+                      else props.onChange(props.values.filter((value) => value !== option));
+                    }}
+                  />
+                  {option}
+                </label>
+              );
+            })
+          ) : (
+            <span className="multi-empty">暂无可选队友</span>
+          )}
+          {props.values.length ? (
+            <button type="button" onClick={() => props.onChange([])}>
+              清空队友
+            </button>
+          ) : null}
+        </div>
+      </details>
+    </div>
+  );
+}
+
+function Segmented(props: { value: string; onChange: (value: string) => void; options: [string, string][] }) {
+  return (
+    <div className="segmented">
+      {props.options.map(([value, label]) => (
+        <button className={props.value === value ? "active" : ""} key={value} onClick={() => props.onChange(value)}>
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function Metric({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
+  return (
+    <div className={accent ? "metric accent" : "metric"}>
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
+function fixed(value: number): string {
+  return Number.isFinite(value) ? value.toFixed(1) : "0.0";
+}
+
+function percent(value: number): string {
+  return `${Math.round(value * 100)}%`;
+}
+
+function compactNumber(value: number): string {
+  if (!Number.isFinite(value)) return "0";
+  if (value >= 10000) return `${(value / 10000).toFixed(1)}w`;
+  return String(Math.round(value));
+}
+
+function compareSummaries(a: PlayerSummary, b: PlayerSummary, key: SummarySortKey, direction: SortDirection): number {
+  const modifier = direction === "asc" ? 1 : -1;
+  if (key === "label") {
+    return a.summoner.localeCompare(b.summoner, "zh-CN") * modifier;
+  }
+  const left = a[key];
+  const right = b[key];
+  return ((typeof left === "number" ? left : 0) - (typeof right === "number" ? right : 0)) * modifier;
+}
+
+function compareCombos(a: ComboSummary, b: ComboSummary, key: ComboSortKey, direction: SortDirection): number {
+  const modifier = direction === "asc" ? 1 : -1;
+  if (key === "label") return a.label.localeCompare(b.label, "zh-CN") * modifier;
+  if (key === "winsLosses") return ((a.wins - a.losses) - (b.wins - b.losses)) * modifier;
+  const left = a[key];
+  const right = b[key];
+  return ((typeof left === "number" ? left : 0) - (typeof right === "number" ? right : 0)) * modifier;
+}
+
+function rankingStartDate(granularity: TimeGranularity): string {
+  const date = new Date();
+  if (granularity === "day") date.setDate(date.getDate() - 1);
+  if (granularity === "week") date.setDate(date.getDate() - 7);
+  if (granularity === "month") date.setMonth(date.getMonth() - 1);
+  return date.toISOString().slice(0, 10);
+}
+
+function filterFriendRows(rows: MatchPlayerRow[], friendSummoners: string[]): MatchPlayerRow[] {
+  if (!friendSummoners.length) return rows;
+  const friends = new Set(friendSummoners);
+  return rows.filter((row) => friends.has(row.summoner));
+}
+
+function uniqueTextList(values: string[]): string[] {
+  return [...new Set(values.map((value) => value.trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, "zh-CN"));
+}
