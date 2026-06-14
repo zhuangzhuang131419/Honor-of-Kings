@@ -424,6 +424,14 @@ h3 {
   align-items: flex-start;
 }
 
+.summary-controls {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
 .combo-controls {
   display: inline-flex;
   align-items: center;

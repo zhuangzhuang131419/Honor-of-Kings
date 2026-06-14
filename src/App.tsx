@@ -226,6 +226,8 @@ function AnalysisView(props: {
   selectedMatch?: Match;
   setSelectedMatchId: (matchId: string) => void;
 }) {
+  const [summaryMinMatches, setSummaryMinMatches] = useState(1);
+
   return (
     <div className="view-grid">
       <section className="panel span-12 allow-overflow">
@@ -267,9 +269,23 @@ function AnalysisView(props: {
       <section className="panel span-7">
         <div className="panel-title">
           <h2>召唤师表现</h2>
-          <DimensionPicker dimensions={props.summaryDimensions} setDimensions={props.setSummaryDimensions} />
+          <div className="summary-controls">
+            <label className="inline-number">
+              <span>场次 ≥</span>
+              <input
+                min="1"
+                type="number"
+                value={summaryMinMatches}
+                onChange={(event) => {
+                  const next = Number(event.target.value);
+                  setSummaryMinMatches(Number.isFinite(next) ? Math.max(1, next) : 1);
+                }}
+              />
+            </label>
+            <DimensionPicker dimensions={props.summaryDimensions} setDimensions={props.setSummaryDimensions} />
+          </div>
         </div>
-        <SummaryTable rows={props.summaries} dimensions={props.summaryDimensions} />
+        <SummaryTable rows={props.summaries} dimensions={props.summaryDimensions} minMatches={summaryMinMatches} />
       </section>
 
       <section className="panel span-5">
@@ -690,16 +706,19 @@ function DimensionPicker(props: { dimensions: SummaryDimension[]; setDimensions:
 function SummaryTable({
   rows,
   dimensions,
+  minMatches,
 }: {
   rows: PlayerSummary[];
   dimensions: SummaryDimension[];
+  minMatches: number;
 }) {
   const [sortKey, setSortKey] = useState<SummarySortKey>("winRate");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
   const label = dimensions.map((dimension) => (dimension === "hero" ? "英雄" : "召唤师")).join(" / ");
+  const visibleRows = useMemo(() => rows.filter((row) => row.matches >= minMatches), [rows, minMatches]);
   const sortedRows = useMemo(
-    () => [...rows].sort((a, b) => compareSummaries(a, b, sortKey, sortDirection)),
-    [rows, sortKey, sortDirection],
+    () => [...visibleRows].sort((a, b) => compareSummaries(a, b, sortKey, sortDirection)),
+    [visibleRows, sortKey, sortDirection],
   );
 
   function updateSort(key: SummarySortKey) {
@@ -723,9 +742,9 @@ function SummaryTable({
     );
   }
 
-  if (!rows.length) {
+  if (!visibleRows.length) {
     return (
-      <div className="empty compact-empty">暂无符合条件的{label}数据</div>
+      <div className="empty compact-empty">暂无场次达到 {minMatches} 的{label}数据</div>
     );
   }
 
@@ -1122,7 +1141,12 @@ function compareSummaries(a: PlayerSummary, b: PlayerSummary, key: SummarySortKe
   }
   const left = a[key];
   const right = b[key];
-  return ((typeof left === "number" ? left : 0) - (typeof right === "number" ? right : 0)) * modifier;
+  const primary = ((typeof left === "number" ? left : 0) - (typeof right === "number" ? right : 0)) * modifier;
+  if (primary !== 0) return primary;
+  if (key === "winRate") {
+    return b.avgRating - a.avgRating || b.matches - a.matches || a.summoner.localeCompare(b.summoner, "zh-CN");
+  }
+  return 0;
 }
 
 function compareCombos(a: ComboSummary, b: ComboSummary, key: ComboSortKey, direction: SortDirection): number {
