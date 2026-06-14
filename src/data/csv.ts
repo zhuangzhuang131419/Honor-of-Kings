@@ -216,7 +216,7 @@ export function assertCsvShape(rows: MatchPlayerRow[]): string[] {
   });
 
   matchCounts.forEach((count, matchId) => {
-    if (count !== 10) errors.push(`${matchId}: 当前 ${count} 行，完整对局建议为 10 行`);
+    if (count !== 5) errors.push(`${matchId}: 当前 ${count} 行，当前口径应记录含鸽一方的 5 名玩家`);
   });
 
   return errors;

@@ -169,6 +169,7 @@ export function summarizeCombinations(
         winRate: combo.matches ? combo.wins / combo.matches : 0,
         avgRating: average(combo.rows, "rating"),
         kda: (kills + assists) / Math.max(1, deaths),
+        avgGold: combo.matches ? sum(combo.rows, "gold") / combo.matches : 0,
         totalGold: sum(combo.rows, "gold"),
       };
     })
@@ -194,6 +195,7 @@ export function timeSeries(rows: MatchPlayerRow[], granularity: TimeGranularity)
         matches,
         wins,
         winRate: matches ? wins / matches : 0,
+        avgRating: average(bucketRows, "rating"),
       };
     })
     .sort((a, b) => a.label.localeCompare(b.label));

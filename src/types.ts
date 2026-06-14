@@ -83,6 +83,7 @@ export type ComboSummary = {
   winRate: number;
   avgRating: number;
   kda: number;
+  avgGold: number;
   totalGold: number;
 };
 
@@ -91,6 +92,7 @@ export type TimeBucket = {
   matches: number;
   wins: number;
   winRate: number;
+  avgRating: number;
 };
 
 export type DraftPlayer = Omit<
