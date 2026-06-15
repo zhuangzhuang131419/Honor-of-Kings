@@ -63,7 +63,7 @@ export default function App() {
   const [rankingGranularity, setRankingGranularity] = useState<TimeGranularity>("month");
   const [summaryDimensions, setSummaryDimensions] = useState<SummaryDimension[]>(["summoner"]);
   const [comboSizes, setComboSizes] = useState<number[]>([2, 3, 4, 5]);
-  const [minMatches, setMinMatches] = useState(1);
+  const [minMatches, setMinMatches] = useState("1");
   const [pkLeft, setPkLeft] = useState<FilterState>(emptyFilters);
   const [pkRight, setPkRight] = useState<FilterState>(emptyFilters);
 
@@ -120,7 +120,7 @@ export default function App() {
 
   const rankedRows = useMemo(() => {
     const scoped = applyFilters(friendRows, matches, { ...emptyFilters, startDate: rankingStartDate(rankingGranularity) });
-    return ranking(scoped, minMatches);
+    return ranking(scoped, parseMinMatchesInput(minMatches));
   }, [friendRows, matches, rankingGranularity, minMatches]);
 
   return (
@@ -226,7 +226,26 @@ function AnalysisView(props: {
   selectedMatch?: Match;
   setSelectedMatchId: (matchId: string) => void;
 }) {
-  const [summaryMinMatches, setSummaryMinMatches] = useState(1);
+  const [summaryMinMatchesInput, setSummaryMinMatchesInput] = useState("1");
+  const [comboMinMatchesInput, setComboMinMatchesInput] = useState("1");
+  const [hoveredMatchId, setHoveredMatchId] = useState("");
+  const summaryMinMatches = parseMinMatchesInput(summaryMinMatchesInput);
+  const comboMinMatches = parseMinMatchesInput(comboMinMatchesInput);
+  const summaryVisibleLabels = useMemo(
+    () => new Set(props.summaries.filter((summary) => summary.matches >= summaryMinMatches).map((summary) => summary.summoner)),
+    [props.summaries, summaryMinMatches],
+  );
+  const summaryScopedRows = useMemo(
+    () => props.rows.filter((row) => summaryVisibleLabels.has(summaryLabelForRow(row, props.summaryDimensions))),
+    [props.rows, props.summaryDimensions, summaryVisibleLabels],
+  );
+  const hoveredMatch = useMemo(() => props.matches.find((match) => match.matchId === hoveredMatchId), [props.matches, hoveredMatchId]);
+
+  useEffect(() => {
+    if (!hoveredMatchId) return;
+    if (summaryScopedRows.some((row) => row.matchId === hoveredMatchId)) return;
+    setHoveredMatchId("");
+  }, [hoveredMatchId, summaryScopedRows]);
 
   return (
     <div className="view-grid">
@@ -275,11 +294,9 @@ function AnalysisView(props: {
               <input
                 min="1"
                 type="number"
-                value={summaryMinMatches}
-                onChange={(event) => {
-                  const next = Number(event.target.value);
-                  setSummaryMinMatches(Number.isFinite(next) ? Math.max(1, next) : 1);
-                }}
+                value={summaryMinMatchesInput}
+                onBlur={() => setSummaryMinMatchesInput(String(summaryMinMatches))}
+                onChange={(event) => setSummaryMinMatchesInput(event.target.value)}
               />
             </label>
             <DimensionPicker dimensions={props.summaryDimensions} setDimensions={props.setSummaryDimensions} />
@@ -291,8 +308,9 @@ function AnalysisView(props: {
       <section className="panel span-5">
         <div className="panel-title">
           <h2>对局下钻</h2>
+          <span>{summaryScopedRows.length} 条记录</span>
         </div>
-        <MatchList rows={props.rows} matches={props.matches} setSelectedMatchId={props.setSelectedMatchId} />
+        <MatchList rows={summaryScopedRows} matches={props.matches} setHoveredMatchId={setHoveredMatchId} />
       </section>
 
       <section className="panel span-12">
@@ -301,20 +319,14 @@ function AnalysisView(props: {
           <ComboControls
             sizes={props.comboSizes}
             setSizes={props.setComboSizes}
+            minMatches={comboMinMatchesInput}
+            setMinMatches={setComboMinMatchesInput}
           />
         </div>
-        <ComboTable rows={props.comboSummaries} />
+        <ComboTable rows={props.comboSummaries} minMatches={comboMinMatches} />
       </section>
 
-      {props.selectedMatch ? (
-        <section className="panel span-12">
-          <div className="panel-title">
-            <h2>单局详情</h2>
-            <span>{props.selectedMatch.playedAt}</span>
-          </div>
-          <MatchDetail match={props.selectedMatch} />
-        </section>
-      ) : null}
+      {hoveredMatch ? <MatchHoverPreview key={hoveredMatch.matchId} match={hoveredMatch} /> : null}
     </div>
   );
 }
@@ -355,8 +367,8 @@ function PkView(props: {
 function RankingView(props: {
   granularity: TimeGranularity;
   setGranularity: (granularity: TimeGranularity) => void;
-  minMatches: number;
-  setMinMatches: (value: number) => void;
+  minMatches: string;
+  setMinMatches: (value: string) => void;
   rows: PlayerSummary[];
 }) {
   return (
@@ -380,7 +392,8 @@ function RankingView(props: {
             type="number"
             min="1"
             value={props.minMatches}
-            onChange={(event) => props.setMinMatches(Number(event.target.value))}
+            onBlur={() => props.setMinMatches(String(parseMinMatchesInput(props.minMatches)))}
+            onChange={(event) => props.setMinMatches(event.target.value)}
           />
         </label>
       </section>
@@ -703,6 +716,21 @@ function DimensionPicker(props: { dimensions: SummaryDimension[]; setDimensions:
   );
 }
 
+function summaryLabelForRow(row: MatchPlayerRow, dimensions: SummaryDimension[]): string {
+  if (!dimensions.length || (dimensions.length === 1 && dimensions[0] === "summoner")) {
+    return row.summoner || "未填写召唤师";
+  }
+  if (dimensions.length === 1 && dimensions[0] === "hero") {
+    return row.hero || "未填写英雄";
+  }
+  return dimensions
+    .map((dimension) => {
+      if (dimension === "summoner") return row.summoner || "未填写召唤师";
+      return row.hero || "未填写英雄";
+    })
+    .join(" / ");
+}
+
 function SummaryTable({
   rows,
   dimensions,
@@ -712,6 +740,8 @@ function SummaryTable({
   dimensions: SummaryDimension[];
   minMatches: number;
 }) {
+  const pageSize = 8;
+  const [page, setPage] = useState(1);
   const [sortKey, setSortKey] = useState<SummarySortKey>("winRate");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
   const label = dimensions.map((dimension) => (dimension === "hero" ? "英雄" : "召唤师")).join(" / ");
@@ -720,6 +750,18 @@ function SummaryTable({
     () => [...visibleRows].sort((a, b) => compareSummaries(a, b, sortKey, sortDirection)),
     [visibleRows, sortKey, sortDirection],
   );
+  const totalPages = Math.max(1, Math.ceil(sortedRows.length / pageSize));
+  const currentPage = Math.min(page, totalPages);
+  const pageStart = (currentPage - 1) * pageSize;
+  const pagedRows = sortedRows.slice(pageStart, pageStart + pageSize);
+
+  useEffect(() => {
+    setPage((current) => Math.min(current, totalPages));
+  }, [totalPages]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [dimensions, minMatches, sortDirection, sortKey]);
 
   function updateSort(key: SummarySortKey) {
     if (sortKey === key) {
@@ -749,43 +791,69 @@ function SummaryTable({
   }
 
   return (
-    <table>
-      <thead>
-        <tr>
-          <SortHeader column="label">{label}</SortHeader>
-          <SortHeader column="matches">场次</SortHeader>
-          <SortHeader column="winRate">胜率</SortHeader>
-          <SortHeader column="avgRating">评分</SortHeader>
-          <SortHeader column="kda">KDA</SortHeader>
-          <SortHeader column="avgDamageDealt">输出</SortHeader>
-          <SortHeader column="avgDamageTaken">承伤</SortHeader>
-          <SortHeader column="totalGold">总经济</SortHeader>
-          <SortHeader column="mvpCount">MVP</SortHeader>
-        </tr>
-      </thead>
-      <tbody>
-        {sortedRows.map((row, index) => (
-          <tr className={rankClass(index)} key={row.summoner}>
-            <td>
-              <RankBadge index={index} />
-              {row.summoner}
-            </td>
-            <td>{row.matches}</td>
-            <td>{percent(row.winRate)}</td>
-            <td>{fixed(row.avgRating)}</td>
-            <td>{fixed(row.kda)}</td>
-            <td>{compactNumber(row.avgDamageDealt)}</td>
-            <td>{compactNumber(row.avgDamageTaken)}</td>
-            <td>{compactNumber(row.totalGold)}</td>
-            <td>{row.mvpCount}</td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
+    <div className="summary-table-shell">
+      <div className="summary-table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <SortHeader column="label">{label}</SortHeader>
+              <SortHeader column="matches">场次</SortHeader>
+              <SortHeader column="winRate">胜率</SortHeader>
+              <SortHeader column="avgRating">评分</SortHeader>
+              <SortHeader column="kda">KDA</SortHeader>
+              <SortHeader column="avgDamageDealt">输出</SortHeader>
+              <SortHeader column="avgDamageTaken">承伤</SortHeader>
+              <SortHeader column="totalGold">总经济</SortHeader>
+              <SortHeader column="mvpCount">MVP</SortHeader>
+            </tr>
+          </thead>
+          <tbody>
+            {pagedRows.map((row, index) => {
+              const rankIndex = pageStart + index;
+              return (
+                <tr className={rankClass(rankIndex)} key={row.summoner}>
+                  <td>
+                    <RankBadge index={rankIndex} />
+                    {row.summoner}
+                  </td>
+                  <td>{row.matches}</td>
+                  <td>{percent(row.winRate)}</td>
+                  <td>{fixed(row.avgRating)}</td>
+                  <td>{fixed(row.kda)}</td>
+                  <td>{compactNumber(row.avgDamageDealt)}</td>
+                  <td>{compactNumber(row.avgDamageTaken)}</td>
+                  <td>{compactNumber(row.totalGold)}</td>
+                  <td>{row.mvpCount}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <div className="pagination-bar">
+        <span>
+          {pageStart + 1}-{Math.min(pageStart + pageSize, sortedRows.length)} / {sortedRows.length}
+        </span>
+        <div>
+          <button type="button" disabled={currentPage <= 1} onClick={() => setPage((current) => Math.max(1, current - 1))}>
+            上一页
+          </button>
+          <strong>{currentPage} / {totalPages}</strong>
+          <button type="button" disabled={currentPage >= totalPages} onClick={() => setPage((current) => Math.min(totalPages, current + 1))}>
+            下一页
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
-function ComboControls(props: { sizes: number[]; setSizes: (sizes: number[]) => void }) {
+function ComboControls(props: {
+  sizes: number[];
+  setSizes: (sizes: number[]) => void;
+  minMatches: string;
+  setMinMatches: (value: string) => void;
+}) {
   function toggleSize(size: number) {
     const next = props.sizes.includes(size) ? props.sizes.filter((item) => item !== size) : [...props.sizes, size].sort((a, b) => a - b);
     props.setSizes(next.length ? next : [size]);
@@ -793,6 +861,16 @@ function ComboControls(props: { sizes: number[]; setSizes: (sizes: number[]) => 
 
   return (
     <div className="combo-controls">
+      <label className="inline-number">
+        <span>场次 ≥</span>
+        <input
+          min="1"
+          type="number"
+          value={props.minMatches}
+          onBlur={() => props.setMinMatches(String(parseMinMatchesInput(props.minMatches)))}
+          onChange={(event) => props.setMinMatches(event.target.value)}
+        />
+      </label>
       <div className="dimension-picker" aria-label="组合人数">
         <span>组合人数</span>
         {[2, 3, 4, 5].map((size) => (
@@ -806,13 +884,28 @@ function ComboControls(props: { sizes: number[]; setSizes: (sizes: number[]) => 
   );
 }
 
-function ComboTable({ rows }: { rows: ComboSummary[] }) {
+function ComboTable({ rows, minMatches }: { rows: ComboSummary[]; minMatches: number }) {
+  const pageSize = 10;
+  const [page, setPage] = useState(1);
   const [sortKey, setSortKey] = useState<ComboSortKey>("winRate");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
+  const visibleRows = useMemo(() => rows.filter((row) => row.matches >= minMatches), [rows, minMatches]);
   const sortedRows = useMemo(
-    () => [...rows].sort((a, b) => compareCombos(a, b, sortKey, sortDirection)),
-    [rows, sortKey, sortDirection],
+    () => [...visibleRows].sort((a, b) => compareCombos(a, b, sortKey, sortDirection)),
+    [visibleRows, sortKey, sortDirection],
   );
+  const totalPages = Math.max(1, Math.ceil(sortedRows.length / pageSize));
+  const currentPage = Math.min(page, totalPages);
+  const pageStart = (currentPage - 1) * pageSize;
+  const pagedRows = sortedRows.slice(pageStart, pageStart + pageSize);
+
+  useEffect(() => {
+    setPage((current) => Math.min(current, totalPages));
+  }, [totalPages]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [minMatches, sortDirection, sortKey]);
 
   function updateSort(key: ComboSortKey) {
     if (sortKey === key) {
@@ -835,64 +928,139 @@ function ComboTable({ rows }: { rows: ComboSummary[] }) {
     );
   }
 
-  if (!rows.length) return <div className="empty compact-empty">暂无符合条件的组合</div>;
+  if (!visibleRows.length) return <div className="empty compact-empty">暂无场次达到 {minMatches} 的组合</div>;
 
   return (
-    <table>
-      <thead>
-        <tr>
-          <SortHeader column="size">组合人数</SortHeader>
-          <SortHeader column="label">召唤师组合</SortHeader>
-          <SortHeader column="matches">场次</SortHeader>
-          <SortHeader column="winRate">胜率</SortHeader>
-          <SortHeader column="winsLosses">胜-负</SortHeader>
-          <SortHeader column="avgRating">平均评分</SortHeader>
-          <SortHeader column="kda">KDA</SortHeader>
-          <SortHeader column="avgGold">平均经济</SortHeader>
-        </tr>
-      </thead>
-      <tbody>
-        {sortedRows.map((row, index) => (
-          <tr className={rankClass(index)} key={`${row.size}-${row.label}`}>
-            <td>{row.size}人</td>
-            <td>
-              <RankBadge index={index} />
-              {row.label}
-            </td>
-            <td>{row.matches}</td>
-            <td>{percent(row.winRate)}</td>
-            <td>
-              {row.wins}-{row.losses}
-            </td>
-            <td>{fixed(row.avgRating)}</td>
-            <td>{fixed(row.kda)}</td>
-            <td>{compactNumber(row.avgGold)}</td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
+    <div className="summary-table-shell combo-table-shell">
+      <div className="summary-table-scroll combo-table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <SortHeader column="size">组合人数</SortHeader>
+              <SortHeader column="label">召唤师组合</SortHeader>
+              <SortHeader column="matches">场次</SortHeader>
+              <SortHeader column="winRate">胜率</SortHeader>
+              <SortHeader column="winsLosses">胜-负</SortHeader>
+              <SortHeader column="avgRating">平均评分</SortHeader>
+              <SortHeader column="kda">KDA</SortHeader>
+              <SortHeader column="avgGold">平均经济</SortHeader>
+            </tr>
+          </thead>
+          <tbody>
+            {pagedRows.map((row, index) => {
+              const rankIndex = pageStart + index;
+              return (
+                <tr className={rankClass(rankIndex)} key={`${row.size}-${row.label}`}>
+                  <td>{row.size}人</td>
+                  <td>
+                    <RankBadge index={rankIndex} />
+                    {row.label}
+                  </td>
+                  <td>{row.matches}</td>
+                  <td>{percent(row.winRate)}</td>
+                  <td>
+                    {row.wins}-{row.losses}
+                  </td>
+                  <td>{fixed(row.avgRating)}</td>
+                  <td>{fixed(row.kda)}</td>
+                  <td>{compactNumber(row.avgGold)}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <div className="pagination-bar">
+        <span>
+          {pageStart + 1}-{Math.min(pageStart + pageSize, sortedRows.length)} / {sortedRows.length}
+        </span>
+        <div>
+          <button type="button" disabled={currentPage <= 1} onClick={() => setPage((current) => Math.max(1, current - 1))}>
+            上一页
+          </button>
+          <strong>{currentPage} / {totalPages}</strong>
+          <button type="button" disabled={currentPage >= totalPages} onClick={() => setPage((current) => Math.min(totalPages, current + 1))}>
+            下一页
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
-function MatchList(props: { rows: MatchPlayerRow[]; matches: Match[]; setSelectedMatchId: (matchId: string) => void }) {
+function MatchList(props: { rows: MatchPlayerRow[]; matches: Match[]; setHoveredMatchId: (matchId: string) => void }) {
   const ids = new Set(props.rows.map((row) => row.matchId));
   const visibleMatches = props.matches.filter((match) => ids.has(match.matchId));
+  if (!visibleMatches.length) return <div className="empty compact-empty">暂无可下钻对局</div>;
   return (
     <div className="match-list">
       {visibleMatches.map((match) => (
-        <button key={match.matchId} onClick={() => props.setSelectedMatchId(match.matchId)}>
+        <div className="match-list-row" key={match.matchId}>
           <span>{match.playedAt}</span>
           <strong className={match.winningSide === "blue" ? "blue-text" : "red-text"}>
             {match.blueKills} : {match.redKills}
           </strong>
           <span>{match.mode}</span>
-        </button>
+          <button
+            aria-label={`预览 ${match.playedAt} 对局截图`}
+            className="preview-trigger"
+            type="button"
+            onBlur={() => props.setHoveredMatchId("")}
+            onFocus={() => props.setHoveredMatchId(match.matchId)}
+            onMouseEnter={() => props.setHoveredMatchId(match.matchId)}
+            onMouseLeave={() => props.setHoveredMatchId("")}
+          >
+            <span className="preview-eye" aria-hidden="true" />
+          </button>
+        </div>
       ))}
     </div>
   );
 }
 
+function MatchHoverPreview({ match }: { match: Match }) {
+  return (
+    <aside className="match-hover-preview" aria-live="polite">
+      <div className="match-preview-title">
+        <strong>原始截图</strong>
+        <span>
+          {match.playedAt} · {match.blueKills}:{match.redKills}
+        </span>
+      </div>
+      <MatchDetail match={match} />
+    </aside>
+  );
+}
+
 function MatchDetail({ match }: { match: Match }) {
+  const [failedImages, setFailedImages] = useState<string[]>([]);
+  const screenshots = [
+    { key: "overview", label: "总览 / KDA", src: matchScreenshotUrl(match, "overview") },
+    { key: "data", label: "数据面板", src: matchScreenshotUrl(match, "data") },
+  ];
+  const visibleScreenshots = screenshots.filter((image) => !failedImages.includes(image.key));
+
+  if (!visibleScreenshots.length) {
+    return <MatchScoreboard match={match} />;
+  }
+
+  return (
+    <div className="match-screenshots">
+      {visibleScreenshots.map((image) => (
+        <figure key={image.key} className="match-shot">
+          <figcaption>{image.label}</figcaption>
+          <img
+            alt={`${match.matchId} ${image.label}`}
+            src={image.src}
+            onError={() => setFailedImages((current) => (current.includes(image.key) ? current : [...current, image.key]))}
+          />
+        </figure>
+      ))}
+    </div>
+  );
+}
+
+function MatchScoreboard({ match }: { match: Match }) {
   return (
     <div className="detail-grid">
       {(["blue", "red"] as Side[]).map((side) => (
@@ -1124,6 +1292,18 @@ function compactNumber(value: number): string {
   if (!Number.isFinite(value)) return "0";
   if (value >= 10000) return `${(value / 10000).toFixed(1)}w`;
   return String(Math.round(value));
+}
+
+function parseMinMatchesInput(value: string): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return 1;
+  return Math.max(1, Math.floor(parsed));
+}
+
+function matchScreenshotUrl(match: Match, kind: "overview" | "data"): string {
+  const base = import.meta.env.BASE_URL.endsWith("/") ? import.meta.env.BASE_URL : `${import.meta.env.BASE_URL}/`;
+  const date = match.playedAt.slice(0, 10);
+  return `${base}data/${encodeURIComponent("对局信息")}/${encodeURIComponent(date)}/${encodeURIComponent(match.matchId)}/${kind}.jpg`;
 }
 
 function shortBucketLabel(label: string): string {
