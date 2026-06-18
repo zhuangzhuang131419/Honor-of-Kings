@@ -586,7 +586,7 @@ function FilterBar(props: {
   return (
     <div className={props.compact ? "filter-grid compact" : "filter-grid"}>
       <SelectField label="召唤师" value={props.filters.summoner} options={props.options.summoners} onChange={(value) => update({ summoner: value })} />
-      <SelectField label="英雄" value={props.filters.hero} options={props.options.heroes} onChange={(value) => update({ hero: value })} />
+      <SearchableSelectField label="英雄" value={props.filters.hero} options={props.options.heroes} onChange={(value) => update({ hero: value })} />
       <MultiSelectField
         label="队友"
         values={props.filters.teammates}
@@ -1205,6 +1205,93 @@ function SelectField(props: { label: string; value: string; options: string[]; o
         ))}
       </select>
     </label>
+  );
+}
+
+function SearchableSelectField(props: { label: string; value: string; options: string[]; onChange: (value: string) => void }) {
+  const [query, setQuery] = useState(props.value);
+  const [open, setOpen] = useState(false);
+  const options = useMemo(() => [...new Set([...(props.value ? [props.value] : []), ...props.options])], [props.options, props.value]);
+  const normalizedQuery = query.trim().toLocaleLowerCase("zh-CN");
+  const visibleOptions = useMemo(() => {
+    if (!normalizedQuery) return options;
+    return options.filter((option) => option.toLocaleLowerCase("zh-CN").includes(normalizedQuery));
+  }, [normalizedQuery, options]);
+
+  useEffect(() => {
+    setQuery(props.value);
+  }, [props.value]);
+
+  function selectOption(value: string) {
+    props.onChange(value);
+    setQuery(value);
+    setOpen(false);
+  }
+
+  function updateQuery(value: string) {
+    setQuery(value);
+    setOpen(true);
+    if (!value) props.onChange("");
+    else if (props.value && value !== props.value) props.onChange("");
+  }
+
+  return (
+    <div className="field searchable-field">
+      <span>{props.label}</span>
+      <div className="searchable-select" onBlur={() => window.setTimeout(() => setOpen(false), 120)}>
+        <input
+          aria-autocomplete="list"
+          aria-expanded={open}
+          role="combobox"
+          value={query}
+          placeholder={options.length ? `全部，可搜 ${options.length} 个英雄` : "暂无可选英雄"}
+          onChange={(event) => updateQuery(event.target.value)}
+          onFocus={() => setOpen(true)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" && visibleOptions[0]) {
+              event.preventDefault();
+              selectOption(visibleOptions[0]);
+            }
+            if (event.key === "Escape") setOpen(false);
+          }}
+        />
+        {props.value ? (
+          <button
+            aria-label="清空英雄筛选"
+            className="search-clear"
+            type="button"
+            onClick={() => {
+              props.onChange("");
+              setQuery("");
+              setOpen(false);
+            }}
+          >
+            ×
+          </button>
+        ) : null}
+        {open ? (
+          <div className="searchable-menu" role="listbox">
+            {visibleOptions.length ? (
+              visibleOptions.slice(0, 12).map((option) => (
+                <button
+                  className={option === props.value ? "active" : ""}
+                  key={option}
+                  role="option"
+                  type="button"
+                  aria-selected={option === props.value}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => selectOption(option)}
+                >
+                  {option}
+                </button>
+              ))
+            ) : (
+              <span>没有匹配英雄</span>
+            )}
+          </div>
+        ) : null}
+      </div>
+    </div>
   );
 }
 
