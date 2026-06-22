@@ -66,6 +66,7 @@ export default function App() {
   const [minMatches, setMinMatches] = useState("1");
   const [pkLeft, setPkLeft] = useState<FilterState>(emptyFilters);
   const [pkRight, setPkRight] = useState<FilterState>(emptyFilters);
+  const isMobile = useMediaQuery("(max-width: 720px)");
 
   useEffect(() => {
     fetch(`${import.meta.env.BASE_URL}data/matches.csv`)
@@ -177,6 +178,7 @@ export default function App() {
             matches={matches}
             selectedMatch={selectedMatch}
             setSelectedMatchId={setSelectedMatchId}
+            isMobile={isMobile}
           />
         ) : null}
         {tab === "pk" ? (
@@ -190,6 +192,7 @@ export default function App() {
             rightOptions={pkRightOptions}
             leftSummary={pkLeftSummary}
             rightSummary={pkRightSummary}
+            isMobile={isMobile}
           />
         ) : null}
         {tab === "ranking" ? (
@@ -199,9 +202,10 @@ export default function App() {
             minMatches={minMatches}
             setMinMatches={setMinMatches}
             rows={rankedRows}
+            isMobile={isMobile}
           />
         ) : null}
-        {tab === "entry" ? <EntryView existingRows={rows} candidateConfig={candidateConfig} /> : null}
+        {tab === "entry" ? <EntryView existingRows={rows} candidateConfig={candidateConfig} isMobile={isMobile} /> : null}
       </section>
     </main>
   );
@@ -225,6 +229,7 @@ function AnalysisView(props: {
   matches: Match[];
   selectedMatch?: Match;
   setSelectedMatchId: (matchId: string) => void;
+  isMobile: boolean;
 }) {
   const [summaryMinMatchesInput, setSummaryMinMatchesInput] = useState("1");
   const [comboMinMatchesInput, setComboMinMatchesInput] = useState("1");
@@ -267,6 +272,7 @@ function AnalysisView(props: {
           setFilters={props.setFilters}
           options={props.linkedOptions}
           includeResult
+          mobile={props.isMobile}
         />
       </section>
 
@@ -302,7 +308,7 @@ function AnalysisView(props: {
             <DimensionPicker dimensions={props.summaryDimensions} setDimensions={props.setSummaryDimensions} />
           </div>
         </div>
-        <SummaryTable rows={props.summaries} dimensions={props.summaryDimensions} minMatches={summaryMinMatches} />
+        <SummaryTable rows={props.summaries} dimensions={props.summaryDimensions} minMatches={summaryMinMatches} isMobile={props.isMobile} />
       </section>
 
       <section className="panel span-5">
@@ -310,7 +316,7 @@ function AnalysisView(props: {
           <h2>对局下钻</h2>
           <span>{summaryScopedRows.length} 条记录</span>
         </div>
-        <MatchList rows={summaryScopedRows} matches={props.matches} setHoveredMatchId={setHoveredMatchId} />
+        <MatchList rows={summaryScopedRows} matches={props.matches} setHoveredMatchId={setHoveredMatchId} isMobile={props.isMobile} />
       </section>
 
       <section className="panel span-12">
@@ -323,10 +329,12 @@ function AnalysisView(props: {
             setMinMatches={setComboMinMatchesInput}
           />
         </div>
-        <ComboTable rows={props.comboSummaries} minMatches={comboMinMatches} />
+        <ComboTable rows={props.comboSummaries} minMatches={comboMinMatches} isMobile={props.isMobile} />
       </section>
 
-      {hoveredMatch ? <MatchHoverPreview key={hoveredMatch.matchId} match={hoveredMatch} /> : null}
+      {hoveredMatch ? (
+        <MatchHoverPreview key={hoveredMatch.matchId} match={hoveredMatch} isMobile={props.isMobile} onClose={() => setHoveredMatchId("")} />
+      ) : null}
     </div>
   );
 }
@@ -341,6 +349,7 @@ function PkView(props: {
   rightOptions: ReturnType<typeof getLinkedOptions>;
   leftSummary: PlayerSummary;
   rightSummary: PlayerSummary;
+  isMobile: boolean;
 }) {
   return (
     <div className="view-grid">
@@ -352,12 +361,12 @@ function PkView(props: {
       </section>
       <section className="panel span-6 blue-edge allow-overflow">
         <h2>蓝方条件</h2>
-        <FilterBar filters={props.left} setFilters={props.setLeft} options={props.leftOptions} compact />
+        <FilterBar filters={props.left} setFilters={props.setLeft} options={props.leftOptions} compact mobile={props.isMobile} />
         <PkCard summary={props.leftSummary} rival={props.rightSummary} />
       </section>
       <section className="panel span-6 red-edge allow-overflow">
         <h2>红方条件</h2>
-        <FilterBar filters={props.right} setFilters={props.setRight} options={props.rightOptions} compact />
+        <FilterBar filters={props.right} setFilters={props.setRight} options={props.rightOptions} compact mobile={props.isMobile} />
         <PkCard summary={props.rightSummary} rival={props.leftSummary} />
       </section>
     </div>
@@ -370,6 +379,7 @@ function RankingView(props: {
   minMatches: string;
   setMinMatches: (value: string) => void;
   rows: PlayerSummary[];
+  isMobile: boolean;
 }) {
   return (
     <div className="view-grid">
@@ -398,40 +408,44 @@ function RankingView(props: {
         </label>
       </section>
       <section className="panel span-12">
-        <table>
-          <thead>
-            <tr>
-              <th>排名</th>
-              <th>召唤师</th>
-              <th>场次</th>
-              <th>胜率</th>
-              <th>评分</th>
-              <th>KDA</th>
-              <th>MVP</th>
-            </tr>
-          </thead>
-          <tbody>
-            {props.rows.map((row, index) => (
-              <tr className={rankClass(index)} key={row.summoner}>
-                <td>
-                  <RankBadge index={index} fallback={String(index + 1)} />
-                </td>
-                <td>{row.summoner}</td>
-                <td>{row.matches}</td>
-                <td>{percent(row.winRate)}</td>
-                <td>{fixed(row.avgRating)}</td>
-                <td>{fixed(row.kda)}</td>
-                <td>{row.mvpCount}</td>
+        {props.isMobile ? (
+          <MobileRankingCards rows={props.rows} />
+        ) : (
+          <table>
+            <thead>
+              <tr>
+                <th>排名</th>
+                <th>召唤师</th>
+                <th>场次</th>
+                <th>胜率</th>
+                <th>评分</th>
+                <th>KDA</th>
+                <th>MVP</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {props.rows.map((row, index) => (
+                <tr className={rankClass(index)} key={row.summoner}>
+                  <td>
+                    <RankBadge index={index} fallback={String(index + 1)} />
+                  </td>
+                  <td>{row.summoner}</td>
+                  <td>{row.matches}</td>
+                  <td>{percent(row.winRate)}</td>
+                  <td>{fixed(row.avgRating)}</td>
+                  <td>{fixed(row.kda)}</td>
+                  <td>{row.mvpCount}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </section>
     </div>
   );
 }
 
-function EntryView({ existingRows, candidateConfig }: { existingRows: MatchPlayerRow[]; candidateConfig: CandidateConfig }) {
+function EntryView({ existingRows, candidateConfig, isMobile }: { existingRows: MatchPlayerRow[]; candidateConfig: CandidateConfig; isMobile: boolean }) {
   const [matchId, setMatchId] = useState(`M${new Date().toISOString().slice(0, 16).replace(/\D/g, "")}`);
   const [playedAt, setPlayedAt] = useState(new Date().toISOString().slice(0, 16));
   const [mode, setMode] = useState("5v5排位");
@@ -569,7 +583,7 @@ function EntryView({ existingRows, candidateConfig }: { existingRows: MatchPlaye
             </button>
           </div>
         </div>
-        <DraftTable players={players} updatePlayer={updatePlayer} />
+        <DraftTable players={players} updatePlayer={updatePlayer} isMobile={isMobile} />
       </section>
     </div>
   );
@@ -581,8 +595,45 @@ function FilterBar(props: {
   options: ReturnType<typeof getLinkedOptions>;
   includeResult?: boolean;
   compact?: boolean;
+  mobile?: boolean;
 }) {
   const update = (patch: Partial<FilterState>) => props.setFilters({ ...props.filters, ...patch });
+  if (props.mobile) {
+    return (
+      <div className={props.compact ? "filter-grid mobile-filter-grid compact" : "filter-grid mobile-filter-grid"}>
+        <SelectField label="召唤师" value={props.filters.summoner} options={props.options.summoners} onChange={(value) => update({ summoner: value })} />
+        <SearchableSelectField label="英雄" value={props.filters.hero} options={props.options.heroes} onChange={(value) => update({ hero: value })} />
+        {props.includeResult ? (
+          <label className="field">
+            <span>胜负</span>
+            <select value={props.filters.result} onChange={(event) => update({ result: event.target.value as FilterState["result"] })}>
+              <option value="all">全部</option>
+              <option value="win">胜利</option>
+              <option value="loss">失败</option>
+            </select>
+          </label>
+        ) : null}
+        <details className="mobile-filter-more">
+          <summary>更多筛选</summary>
+          <div>
+            <MultiSelectField
+              label="队友"
+              values={props.filters.teammates}
+              options={props.options.teammates}
+              onChange={(values) => update({ teammates: values })}
+            />
+            <SelectField label="位置" value={props.filters.position} options={props.options.positions} onChange={(value) => update({ position: value })} />
+            <SelectField label="模式" value={props.filters.mode} options={props.options.modes} onChange={(value) => update({ mode: value })} />
+            <Field label="开始" type="date" value={props.filters.startDate} onChange={(value) => update({ startDate: value })} />
+            <Field label="结束" type="date" value={props.filters.endDate} onChange={(value) => update({ endDate: value })} />
+            <button className="full" type="button" onClick={() => props.setFilters(emptyFilters)}>
+              重置
+            </button>
+          </div>
+        </details>
+      </div>
+    );
+  }
   return (
     <div className={props.compact ? "filter-grid compact" : "filter-grid"}>
       <SelectField label="召唤师" value={props.filters.summoner} options={props.options.summoners} onChange={(value) => update({ summoner: value })} />
@@ -735,10 +786,12 @@ function SummaryTable({
   rows,
   dimensions,
   minMatches,
+  isMobile,
 }: {
   rows: PlayerSummary[];
   dimensions: SummaryDimension[];
   minMatches: number;
+  isMobile: boolean;
 }) {
   const pageSize = 8;
   const [page, setPage] = useState(1);
@@ -792,44 +845,55 @@ function SummaryTable({
 
   return (
     <div className="summary-table-shell">
-      <div className="summary-table-scroll">
-        <table>
-          <thead>
-            <tr>
-              <SortHeader column="label">{label}</SortHeader>
-              <SortHeader column="matches">场次</SortHeader>
-              <SortHeader column="winRate">胜率</SortHeader>
-              <SortHeader column="avgRating">评分</SortHeader>
-              <SortHeader column="kda">KDA</SortHeader>
-              <SortHeader column="avgDamageDealt">输出</SortHeader>
-              <SortHeader column="avgDamageTaken">承伤</SortHeader>
-              <SortHeader column="totalGold">总经济</SortHeader>
-              <SortHeader column="mvpCount">MVP</SortHeader>
-            </tr>
-          </thead>
-          <tbody>
-            {pagedRows.map((row, index) => {
-              const rankIndex = pageStart + index;
-              return (
-                <tr className={rankClass(rankIndex)} key={row.summoner}>
-                  <td>
-                    <RankBadge index={rankIndex} />
-                    {row.summoner}
-                  </td>
-                  <td>{row.matches}</td>
-                  <td>{percent(row.winRate)}</td>
-                  <td>{fixed(row.avgRating)}</td>
-                  <td>{fixed(row.kda)}</td>
-                  <td>{compactNumber(row.avgDamageDealt)}</td>
-                  <td>{compactNumber(row.avgDamageTaken)}</td>
-                  <td>{compactNumber(row.totalGold)}</td>
-                  <td>{row.mvpCount}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+      {isMobile ? (
+        <MobileSummaryCards
+          label={label}
+          rows={pagedRows}
+          pageStart={pageStart}
+          sortKey={sortKey}
+          sortDirection={sortDirection}
+          updateSort={updateSort}
+        />
+      ) : (
+        <div className="summary-table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <SortHeader column="label">{label}</SortHeader>
+                <SortHeader column="matches">场次</SortHeader>
+                <SortHeader column="winRate">胜率</SortHeader>
+                <SortHeader column="avgRating">评分</SortHeader>
+                <SortHeader column="kda">KDA</SortHeader>
+                <SortHeader column="avgDamageDealt">输出</SortHeader>
+                <SortHeader column="avgDamageTaken">承伤</SortHeader>
+                <SortHeader column="totalGold">总经济</SortHeader>
+                <SortHeader column="mvpCount">MVP</SortHeader>
+              </tr>
+            </thead>
+            <tbody>
+              {pagedRows.map((row, index) => {
+                const rankIndex = pageStart + index;
+                return (
+                  <tr className={rankClass(rankIndex)} key={row.summoner}>
+                    <td>
+                      <RankBadge index={rankIndex} />
+                      {row.summoner}
+                    </td>
+                    <td>{row.matches}</td>
+                    <td>{percent(row.winRate)}</td>
+                    <td>{fixed(row.avgRating)}</td>
+                    <td>{fixed(row.kda)}</td>
+                    <td>{compactNumber(row.avgDamageDealt)}</td>
+                    <td>{compactNumber(row.avgDamageTaken)}</td>
+                    <td>{compactNumber(row.totalGold)}</td>
+                    <td>{row.mvpCount}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
       <div className="pagination-bar">
         <span>
           {pageStart + 1}-{Math.min(pageStart + pageSize, sortedRows.length)} / {sortedRows.length}
@@ -884,7 +948,7 @@ function ComboControls(props: {
   );
 }
 
-function ComboTable({ rows, minMatches }: { rows: ComboSummary[]; minMatches: number }) {
+function ComboTable({ rows, minMatches, isMobile }: { rows: ComboSummary[]; minMatches: number; isMobile: boolean }) {
   const pageSize = 10;
   const [page, setPage] = useState(1);
   const [sortKey, setSortKey] = useState<ComboSortKey>("winRate");
@@ -932,44 +996,54 @@ function ComboTable({ rows, minMatches }: { rows: ComboSummary[]; minMatches: nu
 
   return (
     <div className="summary-table-shell combo-table-shell">
-      <div className="summary-table-scroll combo-table-scroll">
-        <table>
-          <thead>
-            <tr>
-              <SortHeader column="size">组合人数</SortHeader>
-              <SortHeader column="label">召唤师组合</SortHeader>
-              <SortHeader column="matches">场次</SortHeader>
-              <SortHeader column="winRate">胜率</SortHeader>
-              <SortHeader column="winsLosses">胜-负</SortHeader>
-              <SortHeader column="avgRating">平均评分</SortHeader>
-              <SortHeader column="kda">KDA</SortHeader>
-              <SortHeader column="avgGold">平均经济</SortHeader>
-            </tr>
-          </thead>
-          <tbody>
-            {pagedRows.map((row, index) => {
-              const rankIndex = pageStart + index;
-              return (
-                <tr className={rankClass(rankIndex)} key={`${row.size}-${row.label}`}>
-                  <td>{row.size}人</td>
-                  <td>
-                    <RankBadge index={rankIndex} />
-                    {row.label}
-                  </td>
-                  <td>{row.matches}</td>
-                  <td>{percent(row.winRate)}</td>
-                  <td>
-                    {row.wins}-{row.losses}
-                  </td>
-                  <td>{fixed(row.avgRating)}</td>
-                  <td>{fixed(row.kda)}</td>
-                  <td>{compactNumber(row.avgGold)}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+      {isMobile ? (
+        <MobileComboCards
+          rows={pagedRows}
+          pageStart={pageStart}
+          sortKey={sortKey}
+          sortDirection={sortDirection}
+          updateSort={updateSort}
+        />
+      ) : (
+        <div className="summary-table-scroll combo-table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <SortHeader column="size">组合人数</SortHeader>
+                <SortHeader column="label">召唤师组合</SortHeader>
+                <SortHeader column="matches">场次</SortHeader>
+                <SortHeader column="winRate">胜率</SortHeader>
+                <SortHeader column="winsLosses">胜-负</SortHeader>
+                <SortHeader column="avgRating">平均评分</SortHeader>
+                <SortHeader column="kda">KDA</SortHeader>
+                <SortHeader column="avgGold">平均经济</SortHeader>
+              </tr>
+            </thead>
+            <tbody>
+              {pagedRows.map((row, index) => {
+                const rankIndex = pageStart + index;
+                return (
+                  <tr className={rankClass(rankIndex)} key={`${row.size}-${row.label}`}>
+                    <td>{row.size}人</td>
+                    <td>
+                      <RankBadge index={rankIndex} />
+                      {row.label}
+                    </td>
+                    <td>{row.matches}</td>
+                    <td>{percent(row.winRate)}</td>
+                    <td>
+                      {row.wins}-{row.losses}
+                    </td>
+                    <td>{fixed(row.avgRating)}</td>
+                    <td>{fixed(row.kda)}</td>
+                    <td>{compactNumber(row.avgGold)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
       <div className="pagination-bar">
         <span>
           {pageStart + 1}-{Math.min(pageStart + pageSize, sortedRows.length)} / {sortedRows.length}
@@ -988,7 +1062,197 @@ function ComboTable({ rows, minMatches }: { rows: ComboSummary[]; minMatches: nu
   );
 }
 
-function MatchList(props: { rows: MatchPlayerRow[]; matches: Match[]; setHoveredMatchId: (matchId: string) => void }) {
+function MobileSummaryCards({
+  label,
+  rows,
+  pageStart,
+  sortKey,
+  sortDirection,
+  updateSort,
+}: {
+  label: string;
+  rows: PlayerSummary[];
+  pageStart: number;
+  sortKey: SummarySortKey;
+  sortDirection: SortDirection;
+  updateSort: (key: SummarySortKey) => void;
+}) {
+  const options: [SummarySortKey, string][] = [
+    ["winRate", "胜率"],
+    ["matches", "场次"],
+    ["avgRating", "评分"],
+    ["kda", "KDA"],
+    ["avgDamageDealt", "输出"],
+    ["avgDamageTaken", "承伤"],
+    ["totalGold", "总经济"],
+    ["mvpCount", "MVP"],
+    ["label", label],
+  ];
+  return (
+    <div className="mobile-card-list">
+      <MobileSortBar
+        value={sortKey}
+        direction={sortDirection}
+        options={options}
+        onSelect={(value) => {
+          if (value !== sortKey) updateSort(value);
+        }}
+        onToggleDirection={() => updateSort(sortKey)}
+      />
+      {rows.map((row, index) => {
+        const rankIndex = pageStart + index;
+        return (
+          <article className={`mobile-result-card ${rankClass(rankIndex)}`} key={row.summoner}>
+            <div className="mobile-card-head">
+              <div>
+                <RankBadge index={rankIndex} fallback={String(rankIndex + 1)} />
+                <strong>{row.summoner}</strong>
+              </div>
+              <b>{percent(row.winRate)}</b>
+            </div>
+            <div className="mobile-stat-grid">
+              <MobileStat label="场次" value={String(row.matches)} />
+              <MobileStat label="评分" value={fixed(row.avgRating)} />
+              <MobileStat label="KDA" value={fixed(row.kda)} />
+              <MobileStat label="MVP" value={String(row.mvpCount)} />
+              <MobileStat label="输出" value={compactNumber(row.avgDamageDealt)} />
+              <MobileStat label="承伤" value={compactNumber(row.avgDamageTaken)} />
+              <MobileStat label="总经济" value={compactNumber(row.totalGold)} />
+            </div>
+          </article>
+        );
+      })}
+    </div>
+  );
+}
+
+function MobileComboCards({
+  rows,
+  pageStart,
+  sortKey,
+  sortDirection,
+  updateSort,
+}: {
+  rows: ComboSummary[];
+  pageStart: number;
+  sortKey: ComboSortKey;
+  sortDirection: SortDirection;
+  updateSort: (key: ComboSortKey) => void;
+}) {
+  const options: [ComboSortKey, string][] = [
+    ["winRate", "胜率"],
+    ["matches", "场次"],
+    ["winsLosses", "胜-负"],
+    ["avgRating", "评分"],
+    ["kda", "KDA"],
+    ["avgGold", "经济"],
+    ["size", "人数"],
+    ["label", "组合"],
+  ];
+  return (
+    <div className="mobile-card-list">
+      <MobileSortBar
+        value={sortKey}
+        direction={sortDirection}
+        options={options}
+        onSelect={(value) => {
+          if (value !== sortKey) updateSort(value);
+        }}
+        onToggleDirection={() => updateSort(sortKey)}
+      />
+      {rows.map((row, index) => {
+        const rankIndex = pageStart + index;
+        return (
+          <article className={`mobile-result-card ${rankClass(rankIndex)}`} key={`${row.size}-${row.label}`}>
+            <div className="mobile-card-head">
+              <div>
+                <RankBadge index={rankIndex} fallback={String(rankIndex + 1)} />
+                <strong>{row.label}</strong>
+              </div>
+              <b>{percent(row.winRate)}</b>
+            </div>
+            <div className="mobile-stat-grid">
+              <MobileStat label="人数" value={`${row.size}人`} />
+              <MobileStat label="场次" value={String(row.matches)} />
+              <MobileStat label="胜-负" value={`${row.wins}-${row.losses}`} />
+              <MobileStat label="评分" value={fixed(row.avgRating)} />
+              <MobileStat label="KDA" value={fixed(row.kda)} />
+              <MobileStat label="经济" value={compactNumber(row.avgGold)} />
+            </div>
+          </article>
+        );
+      })}
+    </div>
+  );
+}
+
+function MobileRankingCards({ rows }: { rows: PlayerSummary[] }) {
+  if (!rows.length) return <div className="empty compact-empty">暂无符合最低场次的排行</div>;
+  return (
+    <div className="mobile-card-list">
+      {rows.map((row, index) => (
+        <article className={`mobile-result-card ${rankClass(index)}`} key={row.summoner}>
+          <div className="mobile-card-head">
+            <div>
+              <RankBadge index={index} fallback={String(index + 1)} />
+              <strong>{row.summoner}</strong>
+            </div>
+            <b>{percent(row.winRate)}</b>
+          </div>
+          <div className="mobile-stat-grid">
+            <MobileStat label="场次" value={String(row.matches)} />
+            <MobileStat label="评分" value={fixed(row.avgRating)} />
+            <MobileStat label="KDA" value={fixed(row.kda)} />
+            <MobileStat label="MVP" value={String(row.mvpCount)} />
+          </div>
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function MobileSortBar<T extends string>({
+  value,
+  direction,
+  options,
+  onSelect,
+  onToggleDirection,
+}: {
+  value: T;
+  direction: SortDirection;
+  options: [T, string][];
+  onSelect: (value: T) => void;
+  onToggleDirection: () => void;
+}) {
+  return (
+    <div className="mobile-sort-bar">
+      <label className="field">
+        <span>排序</span>
+        <select value={value} onChange={(event) => onSelect(event.target.value as T)}>
+          {options.map(([optionValue, optionLabel]) => (
+            <option value={optionValue} key={optionValue}>
+              {optionLabel}
+            </option>
+          ))}
+        </select>
+      </label>
+      <button type="button" onClick={onToggleDirection}>
+        {direction === "asc" ? "升序" : "降序"}
+      </button>
+    </div>
+  );
+}
+
+function MobileStat({ label, value }: { label: string; value: string }) {
+  return (
+    <span className="mobile-stat">
+      <small>{label}</small>
+      <strong>{value}</strong>
+    </span>
+  );
+}
+
+function MatchList(props: { rows: MatchPlayerRow[]; matches: Match[]; setHoveredMatchId: (matchId: string) => void; isMobile: boolean }) {
   const ids = new Set(props.rows.map((row) => row.matchId));
   const visibleMatches = props.matches.filter((match) => ids.has(match.matchId));
   if (!visibleMatches.length) return <div className="empty compact-empty">暂无可下钻对局</div>;
@@ -1005,10 +1269,15 @@ function MatchList(props: { rows: MatchPlayerRow[]; matches: Match[]; setHovered
             aria-label={`预览 ${match.playedAt} 对局截图`}
             className="preview-trigger"
             type="button"
-            onBlur={() => props.setHoveredMatchId("")}
+            onBlur={() => {
+              if (!props.isMobile) props.setHoveredMatchId("");
+            }}
             onFocus={() => props.setHoveredMatchId(match.matchId)}
             onMouseEnter={() => props.setHoveredMatchId(match.matchId)}
             onMouseLeave={() => props.setHoveredMatchId("")}
+            onClick={() => {
+              if (props.isMobile) props.setHoveredMatchId(match.matchId);
+            }}
           >
             <span className="preview-eye" aria-hidden="true" />
           </button>
@@ -1018,7 +1287,7 @@ function MatchList(props: { rows: MatchPlayerRow[]; matches: Match[]; setHovered
   );
 }
 
-function MatchHoverPreview({ match }: { match: Match }) {
+function MatchHoverPreview({ match, isMobile, onClose }: { match: Match; isMobile: boolean; onClose: () => void }) {
   return (
     <aside className="match-hover-preview" aria-live="polite">
       <div className="match-preview-title">
@@ -1026,6 +1295,11 @@ function MatchHoverPreview({ match }: { match: Match }) {
         <span>
           {match.playedAt} · {match.blueKills}:{match.redKills}
         </span>
+        {isMobile ? (
+          <button aria-label="关闭截图预览" className="preview-close" type="button" onClick={onClose}>
+            关闭
+          </button>
+        ) : null}
       </div>
       <MatchDetail match={match} />
     </aside>
@@ -1106,13 +1380,100 @@ function PkCard({ summary, rival }: { summary: PlayerSummary; rival: PlayerSumma
   );
 }
 
-function DraftTable({
+function MobileDraftCards({
   players,
   updatePlayer,
 }: {
   players: DraftPlayer[];
   updatePlayer: (index: number, patch: Partial<DraftPlayer>) => void;
 }) {
+  return (
+    <div className="mobile-draft-list">
+      {players.map((player, index) => (
+        <article className={`mobile-draft-card ${player.side}`} key={index}>
+          <div className="mobile-draft-head">
+            <span className="side-pill">{player.side === "blue" ? "蓝方" : "红方"}</span>
+            <strong>{index % 5 + 1} 号位</strong>
+            <label className="check-field">
+              <input type="checkbox" checked={player.isMvp} onChange={(event) => updatePlayer(index, { isMvp: event.target.checked })} />
+              MVP
+            </label>
+          </div>
+          <div className="mobile-draft-section identity">
+            <label className="field">
+              <span>召唤师</span>
+              <input value={player.summoner} placeholder="召唤师" onChange={(event) => updatePlayer(index, { summoner: event.target.value })} />
+            </label>
+            <label className="field">
+              <span>英雄</span>
+              <input value={player.hero} placeholder="英雄" onChange={(event) => updatePlayer(index, { hero: event.target.value })} />
+            </label>
+            <label className="field">
+              <span>位置</span>
+              <select value={player.position} onChange={(event) => updatePlayer(index, { position: event.target.value })}>
+                {positions.map((position) => (
+                  <option key={position} value={position}>
+                    {position}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <div className="mobile-draft-section kda">
+            <label className="field">
+              <span>评分</span>
+              <NumberInput value={player.rating} onChange={(value) => updatePlayer(index, { rating: value })} placeholder="评分" />
+            </label>
+            <label className="field">
+              <span>K</span>
+              <NumberInput value={player.kills} onChange={(value) => updatePlayer(index, { kills: value })} placeholder="K" />
+            </label>
+            <label className="field">
+              <span>D</span>
+              <NumberInput value={player.deaths} onChange={(value) => updatePlayer(index, { deaths: value })} placeholder="D" />
+            </label>
+            <label className="field">
+              <span>A</span>
+              <NumberInput value={player.assists} onChange={(value) => updatePlayer(index, { assists: value })} placeholder="A" />
+            </label>
+          </div>
+          <div className="mobile-draft-section economy">
+            <label className="field">
+              <span>输出</span>
+              <NumberInput value={player.damageDealt} onChange={(value) => updatePlayer(index, { damageDealt: value })} placeholder="输出" />
+            </label>
+            <label className="field">
+              <span>承伤</span>
+              <NumberInput value={player.damageTaken} onChange={(value) => updatePlayer(index, { damageTaken: value })} placeholder="承伤" />
+            </label>
+            <label className="field">
+              <span>经济</span>
+              <NumberInput value={player.gold} onChange={(value) => updatePlayer(index, { gold: value })} placeholder="经济" />
+            </label>
+            <label className="field">
+              <span>参团</span>
+              <NumberInput value={player.teamfightRate} onChange={(value) => updatePlayer(index, { teamfightRate: value })} placeholder="参团" />
+            </label>
+          </div>
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function DraftTable({
+  players,
+  updatePlayer,
+  isMobile,
+}: {
+  players: DraftPlayer[];
+  updatePlayer: (index: number, patch: Partial<DraftPlayer>) => void;
+  isMobile: boolean;
+}) {
+  if (isMobile) {
+    return <MobileDraftCards players={players} updatePlayer={updatePlayer} />;
+  }
+
   return (
     <div className="draft-table">
       <div className="draft-row draft-header">
@@ -1441,4 +1802,19 @@ function filterFriendRows(rows: MatchPlayerRow[], friendSummoners: string[]): Ma
 
 function uniqueTextList(values: string[]): string[] {
   return [...new Set(values.map((value) => value.trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, "zh-CN"));
+}
+
+function useMediaQuery(query: string): boolean {
+  const [matches, setMatches] = useState(() => (typeof window === "undefined" ? false : window.matchMedia(query).matches));
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const media = window.matchMedia(query);
+    const update = () => setMatches(media.matches);
+    update();
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, [query]);
+
+  return matches;
 }
