@@ -57,15 +57,21 @@ export function summarizeHeroes(rows: MatchPlayerRow[]): PlayerSummary[] {
   return summarizeBy(rows, (row) => row.hero || "未填写英雄");
 }
 
+export function summarizePositions(rows: MatchPlayerRow[]): PlayerSummary[] {
+  return summarizeBy(rows, (row) => row.position || "未填写位置");
+}
+
 export function summarizeByDimensions(rows: MatchPlayerRow[], dimensions: SummaryDimension[]): PlayerSummary[] {
   if (!dimensions.length || (dimensions.length === 1 && dimensions[0] === "summoner")) return summarizePlayers(rows);
   if (dimensions.length === 1 && dimensions[0] === "hero") return summarizeHeroes(rows);
+  if (dimensions.length === 1 && dimensions[0] === "position") return summarizePositions(rows);
 
   return summarizeBy(rows, (row) =>
     dimensions
       .map((dimension) => {
         if (dimension === "summoner") return row.summoner || "未填写召唤师";
-        return row.hero || "未填写英雄";
+        if (dimension === "hero") return row.hero || "未填写英雄";
+        return row.position || "未填写位置";
       })
       .join(" / "),
   );

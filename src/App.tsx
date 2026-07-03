@@ -696,7 +696,7 @@ function WinRateChart({ buckets }: { buckets: ReturnType<typeof timeSeries> }) {
           const showLabel = index === 0 || index === points.length - 1 || index % labelStep === 0;
           const valueY = Math.max(26, point.y - 20);
           return (
-          <g key={point.label}>
+          <g className="line-point" key={point.label}>
             <title>
               {point.label} · 胜率 {percent(point.winRate)} · 平均评分 {fixed(point.avgRating)}
             </title>
@@ -757,6 +757,7 @@ function DimensionPicker(props: { dimensions: SummaryDimension[]; setDimensions:
       {([
         ["summoner", "召唤师"],
         ["hero", "英雄"],
+        ["position", "位置"],
       ] as const).map(([dimension, label]) => (
         <label key={dimension}>
           <input type="checkbox" checked={props.dimensions.includes(dimension)} onChange={() => toggle(dimension)} />
@@ -774,12 +775,22 @@ function summaryLabelForRow(row: MatchPlayerRow, dimensions: SummaryDimension[])
   if (dimensions.length === 1 && dimensions[0] === "hero") {
     return row.hero || "未填写英雄";
   }
+  if (dimensions.length === 1 && dimensions[0] === "position") {
+    return row.position || "未填写位置";
+  }
   return dimensions
     .map((dimension) => {
       if (dimension === "summoner") return row.summoner || "未填写召唤师";
-      return row.hero || "未填写英雄";
+      if (dimension === "hero") return row.hero || "未填写英雄";
+      return row.position || "未填写位置";
     })
     .join(" / ");
+}
+
+function summaryDimensionLabel(dimension: SummaryDimension): string {
+  if (dimension === "summoner") return "召唤师";
+  if (dimension === "hero") return "英雄";
+  return "位置";
 }
 
 function SummaryTable({
@@ -797,7 +808,7 @@ function SummaryTable({
   const [page, setPage] = useState(1);
   const [sortKey, setSortKey] = useState<SummarySortKey>("winRate");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
-  const label = dimensions.map((dimension) => (dimension === "hero" ? "英雄" : "召唤师")).join(" / ");
+  const label = dimensions.map(summaryDimensionLabel).join(" / ");
   const visibleRows = useMemo(() => rows.filter((row) => row.matches >= minMatches), [rows, minMatches]);
   const sortedRows = useMemo(
     () => [...visibleRows].sort((a, b) => compareSummaries(a, b, sortKey, sortDirection)),

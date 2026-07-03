@@ -1,6 +1,6 @@
 export type Side = "blue" | "red";
 export type TimeGranularity = "day" | "week" | "month";
-export type SummaryDimension = "summoner" | "hero";
+export type SummaryDimension = "summoner" | "hero" | "position";
 
 export type MatchPlayerRow = {
   matchId: string;
