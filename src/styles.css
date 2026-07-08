@@ -546,13 +546,13 @@ h3 {
   transition:
     border-color 160ms ease,
     box-shadow 160ms ease,
-    transform 160ms ease;
+    background 160ms ease;
 }
 
 .dimension-picker label:hover {
   border-color: rgba(76, 215, 255, 0.38);
+  background: rgba(8, 24, 54, 0.72);
   box-shadow: 0 0 16px rgba(76, 215, 255, 0.12);
-  transform: translateY(-1px);
 }
 
 .dimension-picker input {
