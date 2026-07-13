@@ -1,11 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import type { ComboSummary, DraftPlayer, FilterState, Match, MatchPlayerRow, PlayerSummary, Side, SummaryDimension, TimeGranularity } from "./types";
 import { assertCsvShape, csvHeaders, groupMatches, parseCsv, rowsToCsv } from "./data/csv";
 import {
   applyFilters,
   emptyFilters,
   filterForPk,
-  getMatchDetail,
   getLinkedOptions,
   getOptions,
   ranking,
@@ -17,7 +16,7 @@ import {
 } from "./data/stats";
 
 type Tab = "analysis" | "pk" | "ranking" | "entry";
-type SummarySortKey = "label" | "matches" | "winRate" | "avgRating" | "kda" | "avgDamageDealt" | "avgDamageTaken" | "totalGold" | "mvpCount";
+type SummarySortKey = "label" | "matches" | "winRate" | "avgRating" | "kda" | "avgDamageDealt" | "avgDamageTaken" | "avgGold" | "mvpCount";
 type ComboSortKey = "size" | "label" | "matches" | "winRate" | "winsLosses" | "avgRating" | "kda" | "avgGold";
 type SortDirection = "asc" | "desc";
 type CandidateConfig = {
@@ -59,7 +58,6 @@ export default function App() {
   const [tab, setTab] = useState<Tab>("analysis");
   const [filters, setFilters] = useState<FilterState>(emptyFilters);
   const [granularity, setGranularity] = useState<TimeGranularity>("day");
-  const [selectedMatchId, setSelectedMatchId] = useState("");
   const [rankingGranularity, setRankingGranularity] = useState<TimeGranularity>("month");
   const [summaryDimensions, setSummaryDimensions] = useState<SummaryDimension[]>(["summoner"]);
   const [comboSizes, setComboSizes] = useState<number[]>([2, 3, 4, 5]);
@@ -112,8 +110,6 @@ export default function App() {
     [filteredRows, friendRows, matches, filters, comboSizes],
   );
   const buckets = useMemo(() => timeSeries(filteredRows, granularity), [filteredRows, granularity]);
-  const selectedMatch = useMemo(() => getMatchDetail(matches, selectedMatchId), [matches, selectedMatchId]);
-
   const pkLeftRows = useMemo(() => filterForPk(friendRows, matches, pkLeft), [friendRows, matches, pkLeft]);
   const pkRightRows = useMemo(() => filterForPk(friendRows, matches, pkRight), [friendRows, matches, pkRight]);
   const pkLeftSummary = useMemo(() => summarizeTarget(pkLeftRows, pkLeft.summoner), [pkLeftRows, pkLeft.summoner]);
@@ -175,9 +171,6 @@ export default function App() {
             comboSizes={comboSizes}
             setComboSizes={setComboSizes}
             rows={filteredRows}
-            matches={matches}
-            selectedMatch={selectedMatch}
-            setSelectedMatchId={setSelectedMatchId}
             isMobile={isMobile}
           />
         ) : null}
@@ -226,31 +219,16 @@ function AnalysisView(props: {
   comboSizes: number[];
   setComboSizes: (sizes: number[]) => void;
   rows: MatchPlayerRow[];
-  matches: Match[];
-  selectedMatch?: Match;
-  setSelectedMatchId: (matchId: string) => void;
   isMobile: boolean;
 }) {
   const [summaryMinMatchesInput, setSummaryMinMatchesInput] = useState("1");
+  const [summaryMinWinRateInput, setSummaryMinWinRateInput] = useState("0");
   const [comboMinMatchesInput, setComboMinMatchesInput] = useState("1");
-  const [hoveredMatchId, setHoveredMatchId] = useState("");
+  const [comboMinWinRateInput, setComboMinWinRateInput] = useState("0");
   const summaryMinMatches = parseMinMatchesInput(summaryMinMatchesInput);
+  const summaryMinWinRate = parseWinRateInput(summaryMinWinRateInput);
   const comboMinMatches = parseMinMatchesInput(comboMinMatchesInput);
-  const summaryVisibleLabels = useMemo(
-    () => new Set(props.summaries.filter((summary) => summary.matches >= summaryMinMatches).map((summary) => summary.summoner)),
-    [props.summaries, summaryMinMatches],
-  );
-  const summaryScopedRows = useMemo(
-    () => props.rows.filter((row) => summaryVisibleLabels.has(summaryLabelForRow(row, props.summaryDimensions))),
-    [props.rows, props.summaryDimensions, summaryVisibleLabels],
-  );
-  const hoveredMatch = useMemo(() => props.matches.find((match) => match.matchId === hoveredMatchId), [props.matches, hoveredMatchId]);
-
-  useEffect(() => {
-    if (!hoveredMatchId) return;
-    if (summaryScopedRows.some((row) => row.matchId === hoveredMatchId)) return;
-    setHoveredMatchId("");
-  }, [hoveredMatchId, summaryScopedRows]);
+  const comboMinWinRate = parseWinRateInput(comboMinWinRateInput);
 
   return (
     <div className="view-grid">
@@ -305,18 +283,28 @@ function AnalysisView(props: {
                 onChange={(event) => setSummaryMinMatchesInput(event.target.value)}
               />
             </label>
+            <label className="inline-number">
+              <span>胜率 ≥</span>
+              <input
+                max="100"
+                min="0"
+                type="number"
+                value={summaryMinWinRateInput}
+                onBlur={() => setSummaryMinWinRateInput(String(summaryMinWinRate))}
+                onChange={(event) => setSummaryMinWinRateInput(event.target.value)}
+              />
+              <span>%</span>
+            </label>
             <DimensionPicker dimensions={props.summaryDimensions} setDimensions={props.setSummaryDimensions} />
           </div>
         </div>
-        <SummaryTable rows={props.summaries} dimensions={props.summaryDimensions} minMatches={summaryMinMatches} isMobile={props.isMobile} />
-      </section>
-
-      <section className="panel span-5">
-        <div className="panel-title">
-          <h2>对局下钻</h2>
-          <span>{summaryScopedRows.length} 条记录</span>
-        </div>
-        <MatchList rows={summaryScopedRows} matches={props.matches} setHoveredMatchId={setHoveredMatchId} isMobile={props.isMobile} />
+        <SummaryTable
+          rows={props.summaries}
+          dimensions={props.summaryDimensions}
+          minMatches={summaryMinMatches}
+          minWinRate={summaryMinWinRate}
+          isMobile={props.isMobile}
+        />
       </section>
 
       <section className="panel span-12">
@@ -327,14 +315,12 @@ function AnalysisView(props: {
             setSizes={props.setComboSizes}
             minMatches={comboMinMatchesInput}
             setMinMatches={setComboMinMatchesInput}
+            minWinRate={comboMinWinRateInput}
+            setMinWinRate={setComboMinWinRateInput}
           />
         </div>
-        <ComboTable rows={props.comboSummaries} minMatches={comboMinMatches} isMobile={props.isMobile} />
+        <ComboTable rows={props.comboSummaries} minMatches={comboMinMatches} minWinRate={comboMinWinRate} isMobile={props.isMobile} />
       </section>
-
-      {hoveredMatch ? (
-        <MatchHoverPreview key={hoveredMatch.matchId} match={hoveredMatch} isMobile={props.isMobile} onClose={() => setHoveredMatchId("")} />
-      ) : null}
     </div>
   );
 }
@@ -623,7 +609,6 @@ function FilterBar(props: {
               onChange={(values) => update({ teammates: values })}
             />
             <SelectField label="位置" value={props.filters.position} options={props.options.positions} onChange={(value) => update({ position: value })} />
-            <SelectField label="模式" value={props.filters.mode} options={props.options.modes} onChange={(value) => update({ mode: value })} />
             <Field label="开始" type="date" value={props.filters.startDate} onChange={(value) => update({ startDate: value })} />
             <Field label="结束" type="date" value={props.filters.endDate} onChange={(value) => update({ endDate: value })} />
             <button className="full" type="button" onClick={() => props.setFilters(emptyFilters)}>
@@ -645,7 +630,6 @@ function FilterBar(props: {
         onChange={(values) => update({ teammates: values })}
       />
       <SelectField label="位置" value={props.filters.position} options={props.options.positions} onChange={(value) => update({ position: value })} />
-      <SelectField label="模式" value={props.filters.mode} options={props.options.modes} onChange={(value) => update({ mode: value })} />
       {props.includeResult ? (
         <label className="field">
           <span>胜负</span>
@@ -664,10 +648,15 @@ function FilterBar(props: {
 }
 
 function WinRateChart({ buckets }: { buckets: ReturnType<typeof timeSeries> }) {
+  const chartRef = useRef<HTMLDivElement>(null);
+  const chartSize = useElementSize(chartRef);
   if (!buckets.length) return <div className="empty">暂无符合条件的数据</div>;
-  const width = 960;
-  const height = 360;
-  const padding = { top: 58, right: 42, bottom: 62, left: 42 };
+  const height = Math.max(220, Math.round(chartSize.height || 310));
+  const compact = height < 270;
+  const width = Math.max(compact ? 520 : 760, Math.round(chartSize.width || 960));
+  const padding = compact
+    ? { top: 44, right: 32, bottom: 44, left: 32 }
+    : { top: 58, right: 42, bottom: 56, left: 42 };
   const innerWidth = width - padding.left - padding.right;
   const innerHeight = height - padding.top - padding.bottom;
   const points = buckets.map((bucket, index) => {
@@ -678,18 +667,44 @@ function WinRateChart({ buckets }: { buckets: ReturnType<typeof timeSeries> }) {
   const linePath = smoothLinePath(points);
   const areaPath = `${linePath} L ${points[points.length - 1].x} ${padding.top + innerHeight} L ${points[0].x} ${padding.top + innerHeight} Z`;
   const labelStep = Math.max(1, Math.ceil(points.length / 6));
+  const baselineY = padding.top + innerHeight;
+  const ratingMax = Math.max(10, Math.ceil(Math.max(...points.map((point) => point.avgRating))));
+  const barSlot = buckets.length === 1 ? innerWidth : innerWidth / Math.max(1, buckets.length - 1);
+  const barWidth = Math.max(8, Math.min(compact ? 18 : 26, barSlot * 0.38));
 
   return (
-    <div className="chart line-chart" role="img" aria-label="胜率折线图">
+    <div className="chart line-chart" ref={chartRef} role="img" aria-label="胜率折线图">
       <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="xMidYMid meet">
         <defs>
           <linearGradient id="lineArea" x1="0" x2="0" y1="0" y2="1">
             <stop offset="0%" stopColor="rgba(76, 215, 255, 0.28)" />
             <stop offset="100%" stopColor="rgba(76, 215, 255, 0.02)" />
           </linearGradient>
+          <linearGradient id="ratingBar" x1="0" x2="0" y1="0" y2="1">
+            <stop offset="0%" stopColor="rgba(255, 218, 111, 0.9)" />
+            <stop offset="55%" stopColor="rgba(255, 188, 72, 0.34)" />
+            <stop offset="100%" stopColor="rgba(255, 188, 72, 0.08)" />
+          </linearGradient>
         </defs>
-        <line className="axis-line" x1={padding.left} x2={padding.left + innerWidth} y1={padding.top + innerHeight} y2={padding.top + innerHeight} />
+        <line className="axis-line" x1={padding.left} x2={padding.left + innerWidth} y1={baselineY} y2={baselineY} />
         <line className="axis-line muted" x1={padding.left} x2={padding.left + innerWidth} y1={padding.top} y2={padding.top} />
+        <g className="rating-bars" aria-label="平均评分柱状图">
+          {points.map((point, index) => {
+            const showLabel = index === 0 || index === points.length - 1 || index % labelStep === 0;
+            const barHeight = Math.max(2, (point.avgRating / ratingMax) * innerHeight);
+            const barY = baselineY - barHeight;
+            return (
+              <g className="rating-bar-group" key={`${point.label}-rating`}>
+                <rect className="rating-bar" x={point.x - barWidth / 2} y={barY} width={barWidth} height={barHeight} rx="5" />
+                {showLabel ? (
+                  <text className="rating-value" x={point.x} y={Math.max(padding.top + 12, barY - 7)}>
+                    {fixed(point.avgRating)}
+                  </text>
+                ) : null}
+              </g>
+            );
+          })}
+        </g>
         <path className="line-area" d={areaPath} />
         <path className="line-path" d={linePath} />
         {points.map((point, index) => {
@@ -702,8 +717,7 @@ function WinRateChart({ buckets }: { buckets: ReturnType<typeof timeSeries> }) {
             </title>
             <circle className="line-dot" cx={point.x} cy={point.y} r="4.5" />
             <text className="line-value" x={point.x} y={valueY}>
-              <tspan x={point.x} dy="0">{percent(point.winRate)}</tspan>
-              <tspan className="line-score" x={point.x} dy="18">评分 {fixed(point.avgRating)}</tspan>
+              {percent(point.winRate)}
             </text>
             {showLabel ? (
               <text className="line-label" x={point.x} y={height - 17}>
@@ -727,6 +741,38 @@ function smoothLinePath(points: Array<{ x: number; y: number }>) {
     const midX = (prev.x + point.x) / 2;
     return `${path} C ${midX} ${prev.y}, ${midX} ${point.y}, ${point.x} ${point.y}`;
   }, "");
+}
+
+function useElementSize(ref: RefObject<HTMLElement | null>) {
+  const [size, setSize] = useState({ width: 0, height: 0 });
+
+  useEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+
+    const update = () => {
+      const rect = element.getBoundingClientRect();
+      setSize((current) => {
+        const width = Math.round(rect.width);
+        const height = Math.round(rect.height);
+        if (current.width === width && current.height === height) return current;
+        return { width, height };
+      });
+    };
+
+    update();
+
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", update);
+      return () => window.removeEventListener("resize", update);
+    }
+
+    const observer = new ResizeObserver(update);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [ref]);
+
+  return size;
 }
 
 function SummaryGrid({ summaries }: { summaries: PlayerSummary[] }) {
@@ -797,11 +843,13 @@ function SummaryTable({
   rows,
   dimensions,
   minMatches,
+  minWinRate,
   isMobile,
 }: {
   rows: PlayerSummary[];
   dimensions: SummaryDimension[];
   minMatches: number;
+  minWinRate: number;
   isMobile: boolean;
 }) {
   const pageSize = 8;
@@ -809,7 +857,10 @@ function SummaryTable({
   const [sortKey, setSortKey] = useState<SummarySortKey>("winRate");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
   const label = dimensions.map(summaryDimensionLabel).join(" / ");
-  const visibleRows = useMemo(() => rows.filter((row) => row.matches >= minMatches), [rows, minMatches]);
+  const visibleRows = useMemo(
+    () => rows.filter((row) => row.matches >= minMatches && row.winRate * 100 >= minWinRate),
+    [rows, minMatches, minWinRate],
+  );
   const sortedRows = useMemo(
     () => [...visibleRows].sort((a, b) => compareSummaries(a, b, sortKey, sortDirection)),
     [visibleRows, sortKey, sortDirection],
@@ -825,7 +876,7 @@ function SummaryTable({
 
   useEffect(() => {
     setPage(1);
-  }, [dimensions, minMatches, sortDirection, sortKey]);
+  }, [dimensions, minMatches, minWinRate, sortDirection, sortKey]);
 
   function updateSort(key: SummarySortKey) {
     if (sortKey === key) {
@@ -850,7 +901,7 @@ function SummaryTable({
 
   if (!visibleRows.length) {
     return (
-      <div className="empty compact-empty">暂无场次达到 {minMatches} 的{label}数据</div>
+      <div className="empty compact-empty">暂无场次达到 {minMatches} 且胜率达到 {minWinRate}% 的{label}数据</div>
     );
   }
 
@@ -877,7 +928,7 @@ function SummaryTable({
                 <SortHeader column="kda">KDA</SortHeader>
                 <SortHeader column="avgDamageDealt">输出</SortHeader>
                 <SortHeader column="avgDamageTaken">承伤</SortHeader>
-                <SortHeader column="totalGold">总经济</SortHeader>
+                <SortHeader column="avgGold">平均经济</SortHeader>
                 <SortHeader column="mvpCount">MVP</SortHeader>
               </tr>
             </thead>
@@ -896,7 +947,7 @@ function SummaryTable({
                     <td>{fixed(row.kda)}</td>
                     <td>{compactNumber(row.avgDamageDealt)}</td>
                     <td>{compactNumber(row.avgDamageTaken)}</td>
-                    <td>{compactNumber(row.totalGold)}</td>
+                    <td>{compactNumber(row.avgGold)}</td>
                     <td>{row.mvpCount}</td>
                   </tr>
                 );
@@ -928,6 +979,8 @@ function ComboControls(props: {
   setSizes: (sizes: number[]) => void;
   minMatches: string;
   setMinMatches: (value: string) => void;
+  minWinRate: string;
+  setMinWinRate: (value: string) => void;
 }) {
   function toggleSize(size: number) {
     const next = props.sizes.includes(size) ? props.sizes.filter((item) => item !== size) : [...props.sizes, size].sort((a, b) => a - b);
@@ -946,6 +999,18 @@ function ComboControls(props: {
           onChange={(event) => props.setMinMatches(event.target.value)}
         />
       </label>
+      <label className="inline-number">
+        <span>胜率 ≥</span>
+        <input
+          max="100"
+          min="0"
+          type="number"
+          value={props.minWinRate}
+          onBlur={() => props.setMinWinRate(String(parseWinRateInput(props.minWinRate)))}
+          onChange={(event) => props.setMinWinRate(event.target.value)}
+        />
+        <span>%</span>
+      </label>
       <div className="dimension-picker" aria-label="组合人数">
         <span>组合人数</span>
         {[2, 3, 4, 5].map((size) => (
@@ -959,12 +1024,15 @@ function ComboControls(props: {
   );
 }
 
-function ComboTable({ rows, minMatches, isMobile }: { rows: ComboSummary[]; minMatches: number; isMobile: boolean }) {
+function ComboTable({ rows, minMatches, minWinRate, isMobile }: { rows: ComboSummary[]; minMatches: number; minWinRate: number; isMobile: boolean }) {
   const pageSize = 10;
   const [page, setPage] = useState(1);
   const [sortKey, setSortKey] = useState<ComboSortKey>("winRate");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
-  const visibleRows = useMemo(() => rows.filter((row) => row.matches >= minMatches), [rows, minMatches]);
+  const visibleRows = useMemo(
+    () => rows.filter((row) => row.matches >= minMatches && row.winRate * 100 >= minWinRate),
+    [rows, minMatches, minWinRate],
+  );
   const sortedRows = useMemo(
     () => [...visibleRows].sort((a, b) => compareCombos(a, b, sortKey, sortDirection)),
     [visibleRows, sortKey, sortDirection],
@@ -980,7 +1048,7 @@ function ComboTable({ rows, minMatches, isMobile }: { rows: ComboSummary[]; minM
 
   useEffect(() => {
     setPage(1);
-  }, [minMatches, sortDirection, sortKey]);
+  }, [minMatches, minWinRate, sortDirection, sortKey]);
 
   function updateSort(key: ComboSortKey) {
     if (sortKey === key) {
@@ -1003,7 +1071,7 @@ function ComboTable({ rows, minMatches, isMobile }: { rows: ComboSummary[]; minM
     );
   }
 
-  if (!visibleRows.length) return <div className="empty compact-empty">暂无场次达到 {minMatches} 的组合</div>;
+  if (!visibleRows.length) return <div className="empty compact-empty">暂无场次达到 {minMatches} 且胜率达到 {minWinRate}% 的组合</div>;
 
   return (
     <div className="summary-table-shell combo-table-shell">
@@ -1095,7 +1163,7 @@ function MobileSummaryCards({
     ["kda", "KDA"],
     ["avgDamageDealt", "输出"],
     ["avgDamageTaken", "承伤"],
-    ["totalGold", "总经济"],
+    ["avgGold", "平均经济"],
     ["mvpCount", "MVP"],
     ["label", label],
   ];
@@ -1128,7 +1196,7 @@ function MobileSummaryCards({
               <MobileStat label="MVP" value={String(row.mvpCount)} />
               <MobileStat label="输出" value={compactNumber(row.avgDamageDealt)} />
               <MobileStat label="承伤" value={compactNumber(row.avgDamageTaken)} />
-              <MobileStat label="总经济" value={compactNumber(row.totalGold)} />
+              <MobileStat label="平均经济" value={compactNumber(row.avgGold)} />
             </div>
           </article>
         );
@@ -1260,117 +1328,6 @@ function MobileStat({ label, value }: { label: string; value: string }) {
       <small>{label}</small>
       <strong>{value}</strong>
     </span>
-  );
-}
-
-function MatchList(props: { rows: MatchPlayerRow[]; matches: Match[]; setHoveredMatchId: (matchId: string) => void; isMobile: boolean }) {
-  const ids = new Set(props.rows.map((row) => row.matchId));
-  const visibleMatches = props.matches.filter((match) => ids.has(match.matchId));
-  if (!visibleMatches.length) return <div className="empty compact-empty">暂无可下钻对局</div>;
-  return (
-    <div className="match-list">
-      {visibleMatches.map((match) => (
-        <div className="match-list-row" key={match.matchId}>
-          <span>{match.playedAt}</span>
-          <strong className={match.winningSide === "blue" ? "blue-text" : "red-text"}>
-            {match.blueKills} : {match.redKills}
-          </strong>
-          <span>{match.mode}</span>
-          <button
-            aria-label={`预览 ${match.playedAt} 对局截图`}
-            className="preview-trigger"
-            type="button"
-            onBlur={() => {
-              if (!props.isMobile) props.setHoveredMatchId("");
-            }}
-            onFocus={() => props.setHoveredMatchId(match.matchId)}
-            onMouseEnter={() => props.setHoveredMatchId(match.matchId)}
-            onMouseLeave={() => props.setHoveredMatchId("")}
-            onClick={() => {
-              if (props.isMobile) props.setHoveredMatchId(match.matchId);
-            }}
-          >
-            <span className="preview-eye" aria-hidden="true" />
-          </button>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function MatchHoverPreview({ match, isMobile, onClose }: { match: Match; isMobile: boolean; onClose: () => void }) {
-  return (
-    <aside className="match-hover-preview" aria-live="polite">
-      <div className="match-preview-title">
-        <strong>原始截图</strong>
-        <span>
-          {match.playedAt} · {match.blueKills}:{match.redKills}
-        </span>
-        {isMobile ? (
-          <button aria-label="关闭截图预览" className="preview-close" type="button" onClick={onClose}>
-            关闭
-          </button>
-        ) : null}
-      </div>
-      <MatchDetail match={match} />
-    </aside>
-  );
-}
-
-function MatchDetail({ match }: { match: Match }) {
-  const [failedImages, setFailedImages] = useState<string[]>([]);
-  const screenshots = [
-    { key: "overview", label: "总览 / KDA", src: matchScreenshotUrl(match, "overview") },
-    { key: "data", label: "数据面板", src: matchScreenshotUrl(match, "data") },
-  ];
-  const visibleScreenshots = screenshots.filter((image) => !failedImages.includes(image.key));
-
-  if (!visibleScreenshots.length) {
-    return <MatchScoreboard match={match} />;
-  }
-
-  return (
-    <div className="match-screenshots">
-      {visibleScreenshots.map((image) => (
-        <figure key={image.key} className="match-shot">
-          <figcaption>{image.label}</figcaption>
-          <img
-            alt={`${match.matchId} ${image.label}`}
-            src={image.src}
-            onError={() => setFailedImages((current) => (current.includes(image.key) ? current : [...current, image.key]))}
-          />
-        </figure>
-      ))}
-    </div>
-  );
-}
-
-function MatchScoreboard({ match }: { match: Match }) {
-  return (
-    <div className="detail-grid">
-      {(["blue", "red"] as Side[]).map((side) => (
-        <div className={`team-column ${side}`} key={side}>
-          <h3>{side === "blue" ? "蓝方" : "红方"}</h3>
-          {match.players
-            .filter((player) => player.side === side)
-            .map((player) => (
-              <div className="player-row" key={`${player.matchId}-${player.summoner}`}>
-                <div>
-                  <strong>{player.summoner}</strong>
-                  <span>
-                    {player.hero} · {player.position}
-                  </span>
-                </div>
-                <b>{fixed(player.rating)}</b>
-                <span>
-                  {player.kills}/{player.deaths}/{player.assists}
-                </span>
-                <span>{compactNumber(player.damageDealt)}</span>
-              </div>
-            ))}
-        </div>
-      ))}
-    </div>
   );
 }
 
@@ -1759,10 +1716,10 @@ function parseMinMatchesInput(value: string): number {
   return Math.max(1, Math.floor(parsed));
 }
 
-function matchScreenshotUrl(match: Match, kind: "overview" | "data"): string {
-  const base = import.meta.env.BASE_URL.endsWith("/") ? import.meta.env.BASE_URL : `${import.meta.env.BASE_URL}/`;
-  const date = match.playedAt.slice(0, 10);
-  return `${base}data/${encodeURIComponent("对局信息")}/${encodeURIComponent(date)}/${encodeURIComponent(match.matchId)}/${kind}.jpg`;
+function parseWinRateInput(value: string): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return 0;
+  return Math.min(100, Math.max(0, Math.floor(parsed)));
 }
 
 function shortBucketLabel(label: string): string {

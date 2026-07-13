@@ -1055,6 +1055,46 @@ textarea:hover,
   fill: url("#lineArea");
 }
 
+.rating-bars {
+  opacity: 0.92;
+}
+
+.rating-bar-group {
+  transform-box: fill-box;
+  transform-origin: bottom;
+}
+
+.rating-bar {
+  fill: url("#ratingBar");
+  stroke: rgba(255, 221, 129, 0.32);
+  stroke-width: 1;
+  filter: drop-shadow(0 0 10px rgba(255, 195, 73, 0.2));
+  transform-box: fill-box;
+  transform-origin: bottom;
+  animation: bar-rise 420ms ease both;
+  transition:
+    filter 140ms ease,
+    opacity 140ms ease,
+    transform 140ms ease;
+}
+
+.rating-bar-group:hover .rating-bar {
+  filter:
+    drop-shadow(0 0 8px rgba(255, 235, 162, 0.58))
+    drop-shadow(0 0 18px rgba(255, 184, 56, 0.28));
+  opacity: 1;
+  transform: scaleY(1.03);
+}
+
+.rating-value {
+  fill: #ffe38f;
+  font-size: 11px;
+  font-weight: 800;
+  stroke: none;
+  text-anchor: middle;
+  filter: drop-shadow(0 0 6px rgba(255, 177, 52, 0.56));
+}
+
 .line-path {
   fill: none;
   stroke: #4cd7ff;
@@ -1103,12 +1143,6 @@ textarea:hover,
   font-weight: 800;
   stroke: none;
   text-anchor: middle;
-}
-
-.line-score {
-  fill: #ffd77a;
-  font-size: 11px;
-  font-weight: 700;
 }
 
 .line-label {
@@ -1799,6 +1833,18 @@ tbody tr:nth-child(n + 6),
   to {
     opacity: 1;
     transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes bar-rise {
+  from {
+    opacity: 0;
+    transform: scaleY(0.08);
+  }
+
+  to {
+    opacity: 1;
+    transform: scaleY(1);
   }
 }
 
