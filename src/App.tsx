@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
 import type { ComboSummary, DraftPlayer, FilterState, Match, MatchPlayerRow, PlayerSummary, Side, SummaryDimension, TimeGranularity } from "./types";
 import { assertCsvShape, csvHeaders, groupMatches, parseCsv, rowsToCsv } from "./data/csv";
 import {
@@ -649,7 +649,13 @@ function FilterBar(props: {
 
 function WinRateChart({ buckets }: { buckets: ReturnType<typeof timeSeries> }) {
   const chartRef = useRef<HTMLDivElement>(null);
-  const chartSize = useElementSize(chartRef);
+  const chartSize = useElementSize(chartRef, buckets.length > 0);
+  const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
+
+  useEffect(() => {
+    setHoveredIndex(null);
+  }, [buckets]);
+
   if (!buckets.length) return <div className="empty">暂无符合条件的数据</div>;
   const height = Math.max(220, Math.round(chartSize.height || 310));
   const compact = height < 270;
@@ -671,6 +677,21 @@ function WinRateChart({ buckets }: { buckets: ReturnType<typeof timeSeries> }) {
   const ratingMax = Math.max(10, Math.ceil(Math.max(...points.map((point) => point.avgRating))));
   const barSlot = buckets.length === 1 ? innerWidth : innerWidth / Math.max(1, buckets.length - 1);
   const barWidth = Math.max(8, Math.min(compact ? 18 : 26, barSlot * 0.38));
+  const tooltipWidth = compact ? 180 : 196;
+  const tooltipHeight = 96;
+  const hoveredPoint = hoveredIndex === null ? null : points[hoveredIndex];
+  const tooltipX = hoveredPoint
+    ? Math.min(
+        Math.max(padding.left, hoveredPoint.x - tooltipWidth / 2),
+        Math.max(padding.left, width - padding.right - tooltipWidth),
+      )
+    : 0;
+  const tooltipY = hoveredPoint
+    ? Math.min(
+        Math.max(padding.top + 6, hoveredPoint.y - tooltipHeight - 18),
+        Math.max(padding.top + 6, height - padding.bottom - tooltipHeight),
+      )
+    : 0;
 
   return (
     <div className="chart line-chart" ref={chartRef} role="img" aria-label="胜率折线图">
@@ -693,8 +714,19 @@ function WinRateChart({ buckets }: { buckets: ReturnType<typeof timeSeries> }) {
             const showLabel = index === 0 || index === points.length - 1 || index % labelStep === 0;
             const barHeight = Math.max(2, (point.avgRating / ratingMax) * innerHeight);
             const barY = baselineY - barHeight;
+            const tooltipLabel = `${point.label} · 场次 ${point.matches} · 胜率 ${percent(point.winRate)} · 平均评分 ${fixed(point.avgRating)}`;
             return (
-              <g className="rating-bar-group" key={`${point.label}-rating`}>
+              <g
+                className="rating-bar-group"
+                key={`${point.label}-rating`}
+                tabIndex={0}
+                aria-label={tooltipLabel}
+                onPointerEnter={() => setHoveredIndex(index)}
+                onPointerLeave={() => setHoveredIndex(null)}
+                onFocus={() => setHoveredIndex(index)}
+                onBlur={() => setHoveredIndex(null)}
+              >
+                <title>{tooltipLabel}</title>
                 <rect className="rating-bar" x={point.x - barWidth / 2} y={barY} width={barWidth} height={barHeight} rx="5" />
                 {showLabel ? (
                   <text className="rating-value" x={point.x} y={Math.max(padding.top + 12, barY - 7)}>
@@ -710,23 +742,48 @@ function WinRateChart({ buckets }: { buckets: ReturnType<typeof timeSeries> }) {
         {points.map((point, index) => {
           const showLabel = index === 0 || index === points.length - 1 || index % labelStep === 0;
           const valueY = Math.max(26, point.y - 20);
+          const tooltipLabel = `${point.label} · 场次 ${point.matches} · 胜率 ${percent(point.winRate)} · 平均评分 ${fixed(point.avgRating)}`;
           return (
-          <g className="line-point" key={point.label}>
-            <title>
-              {point.label} · 胜率 {percent(point.winRate)} · 平均评分 {fixed(point.avgRating)}
-            </title>
-            <circle className="line-dot" cx={point.x} cy={point.y} r="4.5" />
-            <text className="line-value" x={point.x} y={valueY}>
-              {percent(point.winRate)}
-            </text>
-            {showLabel ? (
-              <text className="line-label" x={point.x} y={height - 17}>
-                {shortBucketLabel(point.label)}
+            <g
+              className="line-point"
+              key={point.label}
+              tabIndex={0}
+              aria-label={tooltipLabel}
+              onPointerEnter={() => setHoveredIndex(index)}
+              onPointerLeave={() => setHoveredIndex(null)}
+              onFocus={() => setHoveredIndex(index)}
+              onBlur={() => setHoveredIndex(null)}
+            >
+              <title>{tooltipLabel}</title>
+              <circle className="line-dot" cx={point.x} cy={point.y} r="4.5" />
+              <text className="line-value" x={point.x} y={valueY}>
+                {percent(point.winRate)}
               </text>
-            ) : null}
-          </g>
+              {showLabel ? (
+                <text className="line-label" x={point.x} y={height - 17}>
+                  {shortBucketLabel(point.label)}
+                </text>
+              ) : null}
+            </g>
           );
         })}
+        {hoveredPoint ? (
+          <g className="chart-tooltip" transform={`translate(${tooltipX} ${tooltipY})`} pointerEvents="none">
+            <rect className="chart-tooltip-card" width={tooltipWidth} height={tooltipHeight} rx="8" />
+            <text className="chart-tooltip-title" x="14" y="21">
+              {hoveredPoint.label}
+            </text>
+            <text className="chart-tooltip-line" x="14" y="42">
+              场次 {hoveredPoint.matches} · 胜 {hoveredPoint.wins} · 负 {hoveredPoint.matches - hoveredPoint.wins}
+            </text>
+            <text className="chart-tooltip-line" x="14" y="62">
+              胜率 {percent(hoveredPoint.winRate)}
+            </text>
+            <text className="chart-tooltip-line" x="14" y="82">
+              平均评分 {fixed(hoveredPoint.avgRating)}
+            </text>
+          </g>
+        ) : null}
       </svg>
     </div>
   );
@@ -743,10 +800,11 @@ function smoothLinePath(points: Array<{ x: number; y: number }>) {
   }, "");
 }
 
-function useElementSize(ref: RefObject<HTMLElement | null>) {
+function useElementSize(ref: RefObject<HTMLElement | null>, enabled = true) {
   const [size, setSize] = useState({ width: 0, height: 0 });
 
-  useEffect(() => {
+  useLayoutEffect(() => {
+    if (!enabled) return;
     const element = ref.current;
     if (!element) return;
 
@@ -770,7 +828,7 @@ function useElementSize(ref: RefObject<HTMLElement | null>) {
     const observer = new ResizeObserver(update);
     observer.observe(element);
     return () => observer.disconnect();
-  }, [ref]);
+  }, [enabled, ref]);
 
   return size;
 }

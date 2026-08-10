@@ -1086,6 +1086,18 @@ textarea:hover,
   transform: scaleY(1.03);
 }
 
+.rating-bar-group:focus-visible,
+.line-point:focus-visible {
+  outline: none;
+}
+
+.rating-bar-group:focus-visible .rating-bar,
+.line-point:focus-visible .line-dot {
+  filter:
+    drop-shadow(0 0 8px rgba(255, 255, 255, 0.8))
+    drop-shadow(0 0 18px rgba(76, 215, 255, 0.95));
+}
+
 .rating-value {
   fill: #ffe38f;
   font-size: 11px;
@@ -1150,6 +1162,38 @@ textarea:hover,
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0;
+}
+
+.chart-tooltip {
+  animation: tooltip-rise 140ms ease both;
+}
+
+.chart-tooltip-card {
+  fill: rgba(4, 14, 34, 0.96);
+  stroke: rgba(103, 220, 255, 0.82);
+  stroke-width: 1;
+  filter:
+    drop-shadow(0 8px 18px rgba(0, 0, 0, 0.42))
+    drop-shadow(0 0 12px rgba(76, 215, 255, 0.18));
+}
+
+.chart-tooltip-title,
+.chart-tooltip-line {
+  pointer-events: none;
+  stroke: none;
+  text-anchor: start;
+}
+
+.chart-tooltip-title {
+  fill: #f2fbff;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.chart-tooltip-line {
+  fill: #b8d2ea;
+  font-size: 11px;
+  font-weight: 700;
 }
 
 .metric-grid {
@@ -1879,6 +1923,16 @@ tbody tr:nth-child(n + 6),
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+@keyframes tooltip-rise {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
   }
 }
 
